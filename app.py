@@ -239,7 +239,7 @@ elif st.session_state.stage == 'playing':
                 x="Year", 
                 y="Value", 
                 color="Asset_Name",
-                title="📈 ASSET GROWTH TRACKER",
+                title="📈",
                 # 自訂顏色 (保持你的網美配色)
                 color_discrete_map={
                     '分紅': '#FF6B6B', '美債': '#4ECDC4', '台股': '#FFE66D',
