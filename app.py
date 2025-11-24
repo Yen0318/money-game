@@ -205,7 +205,7 @@ if st.session_state.stage == 'setup':
 # ==========================================
 elif st.session_state.stage == 'playing':
     
-    # Dashboard 頂部
+    # --- 1. 頂部儀表板 (Dashboard) ---
     total = sum(st.session_state.assets.values())
     roi = (total - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
     
@@ -213,91 +213,13 @@ elif st.session_state.stage == 'playing':
         c1, c2, c3 = st.columns(3)
         c1.metric("年份", f"{st.session_state.year} / 30")
         c2.metric("財富累積", f"${int(total):,}")
-        c3.metric("報酬率", f"{roi:.1f}%", delta_color="off")
+        c3.metric("總報酬率", f"{roi:.1f}%", delta_color="off")
         st.progress(st.session_state.year / 30)
 
-    # 圖表
-# ... (上面是 Dashboard 頂部代碼) ...
-
- # --- ✨ PRO 級互動圖表區 (高對比增強版) ✨ ---
-    if len(st.session_state.history) > 0:
-        import plotly.express as px
-        
-        with st.container():
-            df = pd.DataFrame(st.session_state.history)
-            
-            # 1. 資料整理
-            df_melted = df.melt(id_vars=['Year', 'Total'], 
-                                value_vars=list(ASSET_KEYS),
-                                var_name='Asset_Type', 
-                                value_name='Value')
-            df_melted['Asset_Name'] = df_melted['Asset_Type'].map(ASSET_NAMES)
-            
-            # 2. 繪製堆疊柱狀圖
-            fig = px.bar(
-                df_melted, 
-                x="Year", 
-                y="Value", 
-                color="Asset_Name",
-                title="📈",
-                # 自訂顏色 (保持你的網美配色)
-                color_discrete_map={
-                    '分紅': '#FF6B6B', '美債': '#4ECDC4', '台股': '#FFE66D',
-                    '現金': '#F7FFF7', '加密': '#C44569'
-                },
-                labels={"Value": "資產價值 ($)", "Year": "年份", "Asset_Name": "資產類別"}
-            )
-            
-            # 3. ✨ 關鍵修改：增強可讀性 ✨
-            fig.update_layout(
-                # 給圖表加一個半透明黑底，讓字跳出來！
-                plot_bgcolor="rgba(0,0,0,0)",   
-                paper_bgcolor="rgba(0,0,0,0.4)", # 整張圖表加深色背景
-                
-                # 字體設定
-                font_color="white",
-                font_size=16,          # 字體加大
-                font_family="Arial Black", # 用粗體字
-                
-                title_font_size=24,
-                legend_title_text="",
-                hovermode="x unified",
-                bargap=0.3,
-                
-                # 調整圖表邊距，讓它不要貼邊
-                margin=dict(l=20, r=20, t=30, b=20),
-                
-                # 圖例 (Legend) 設定：字體加大並加背景
-                legend=dict(
-                    orientation="h",   # 改成水平排列，放在上面
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1,
-                    font=dict(size=14, color="white"),
-                    bgcolor="rgba(0,0,0,0.5)" # 圖例也加深底色
-                )
-            )
-            
-            # 4. 優化座標軸文字
-            fig.update_xaxes(
-                showgrid=False, 
-                tickfont=dict(size=14, color="#FFD700", family="Arial Black") # 年份用金色粗體
-            )
-            fig.update_yaxes(
-                showgrid=True, 
-                gridcolor="rgba(255,255,255,0.2)", # 格線明顯一點
-                tickfont=dict(size=14, color="white")
-            )
-            
-            # 5. 懸停顯示格式 ($1,234,567)
-            fig.update_traces(hovertemplate="%{y:,.0f}") 
-
-            st.plotly_chart(fig, use_container_width=True)
-
-    st.write("")
+    st.write("") # 空行
     current_year = st.session_state.year
     
+    # --- 2. 控制按鈕與劇情區 (移到中間！) ---
     if current_year < 30:
         # A. 跑分階段
         if current_year in [0, 10, 20] and not st.session_state.get('waiting_for_event', False):
@@ -325,9 +247,9 @@ elif st.session_state.stage == 'playing':
         # B. 抽卡階段
         elif st.session_state.get('waiting_for_event', False):
             with st.container():
-                st.markdown(f"<h2 style='text-align:center; color:#FFD700;'>🃏 大事件: Year {current_year}</h2>", unsafe_allow_html=True)
+                st.markdown(f"<h2 style='text-align:center; color:#FFD700;'>🃏 命運時刻: 第 {current_year} 年</h2>", unsafe_allow_html=True)
                 
-                selected_card = st.selectbox("Select Event Card", list(EVENT_CARDS.keys()), label_visibility="collapsed")
+                selected_card = st.selectbox("選擇發生的事件", list(EVENT_CARDS.keys()), label_visibility="collapsed")
                 card_data = EVENT_CARDS[selected_card]
                 
                 st.info(f"{card_data['desc']}")
@@ -339,7 +261,7 @@ elif st.session_state.stage == 'playing':
                 c4.metric("現金", f"{card_data['cash']}%")
                 c5.metric("加密", f"{card_data['crypto']}%")
                 
-                if st.button("💥 選擇卡牌！"):
+                if st.button("💥 命運卡牌！"):
                     st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
                     st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
                     st.session_state.assets['TWStock']  *= (1 + card_data['stock']/100)
@@ -354,6 +276,58 @@ elif st.session_state.stage == 'playing':
                     if st.session_state.year == 30:
                         st.session_state.stage = 'finished'
                     st.rerun()
+
+    # --- 3. 圖表區 (現在移到最下面了！) ---
+    st.markdown("---") # 加一條分隔線比較好看
+    if len(st.session_state.history) > 0:
+        import plotly.express as px
+        
+        with st.container():
+            df = pd.DataFrame(st.session_state.history)
+            df_melted = df.melt(id_vars=['Year', 'Total'], 
+                                value_vars=list(ASSET_KEYS),
+                                var_name='Asset_Type', 
+                                value_name='Value')
+            df_melted['Asset_Name'] = df_melted['Asset_Type'].map(ASSET_NAMES)
+            
+            fig = px.bar(
+                df_melted, 
+                x="Year", 
+                y="Value", 
+                color="Asset_Name",
+                title="📈 ASSET GROWTH TRACKER",
+                color_discrete_map={
+                    '分紅': '#FF6B6B', '美債': '#4ECDC4', '台股': '#FFE66D',
+                    '現金': '#F7FFF7', '加密': '#C44569'
+                },
+                labels={"Value": "資產價值 ($)", "Year": "年份", "Asset_Name": "資產類別"}
+            )
+            
+            fig.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)",   
+                paper_bgcolor="rgba(0,0,0,0.4)", 
+                font_color="white",
+                font_family="Arial",
+                title_font_size=20,
+                title_font_color="#FFD700",
+                title_x=0,
+                legend_title_text="",
+                hovermode="x unified",
+                bargap=0.3,
+                margin=dict(l=20, r=20, t=50, b=20),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom", y=1.02,
+                    xanchor="right", x=1,
+                    font=dict(size=12, color="white"),
+                    bgcolor="rgba(0,0,0,0.5)"
+                )
+            )
+            fig.update_xaxes(showgrid=False, tickfont=dict(size=14, color="#FFD700"))
+            fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.2)", tickfont=dict(size=12, color="white"))
+            fig.update_traces(hovertemplate="%{y:,.0f}") 
+
+            st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
 # 階段 3: 結算 (Finished)
