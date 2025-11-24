@@ -43,23 +43,34 @@ st.markdown("""
         100% {background-position: 0% 50%;}
     }
 
-    /* B. 標題：清晰度修復 */
+ /* B. 標題：清晰度修復 */
     h1 {
         font-family: 'Helvetica Neue', sans-serif;
         font-weight: 900 !important;
-        font-size: 4rem !important;
+        
+        /* 👇👇👇 修改這裡 (原本是 4rem) 👇👇👇 */
+        font-size: 2.5rem !important;  
+        /* 建議：電腦版用 3rem 或 4rem，手機若覺得太大可改為 2rem 或 2.5rem */
+        /* 1rem 大約等於 16px，所以 2.5rem 大約是 40px */
+        
         color: #FFFFFF !important;
-        text-shadow: 4px 4px 10px rgba(0,0,0,0.8); /* 加重陰影 */
+        text-shadow: 4px 4px 10px rgba(0,0,0,0.8);
         text-align: center;
         margin-bottom: 10px !important;
     }
+    
     /* 隱藏討厭的連結符號 */
     h1 a, h2 a, h3 a { display: none !important; }
     
     .subtitle {
         text-align: center; color: rgba(255,255,255,0.95);
         margin-top: -15px; margin-bottom: 30px;
-        font-size: 1.3rem; font-weight: 600;
+        
+        /* 👇👇👇 修改這裡 (原本是 1.3rem) 👇👇👇 */
+        font-size: 1.0rem; 
+        /* 建議：想要小一點精緻一點，可以改 1.0rem 或 16px */
+        
+        font-weight: 600;
         text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
     }
 
@@ -146,8 +157,8 @@ with st.sidebar:
     st.json(BASE_RATES)
 
 # --- 主標題區 (使用新的 class) ---
-st.title("💰翻轉命運 30 年 (Flip Your Destiny)💰")
-st.markdown("<div class='subtitle'>TS_IFRC_天行</div>", unsafe_allow_html=True)
+st.title("💰翻轉命運 30 年💰")
+st.markdown("<div class='subtitle'>Flip Your Destiny_TS_IFRC_天行</div>", unsafe_allow_html=True)
 st.write("")
 
 # ==========================================
@@ -158,7 +169,7 @@ if st.session_state.stage == 'setup':
     col_l, col_m, col_r = st.columns([1, 2, 1])
     with col_m:
         with st.container():
-            st.markdown("### 🚀 STARTING CAPITAL")
+            st.markdown("### 🚀 起始資金")
             initial_wealth = st.number_input("輸入初始資金", value=1000000, step=100000, label_visibility="collapsed")
             
             st.markdown("---")
