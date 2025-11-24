@@ -27,7 +27,7 @@ EVENT_CARDS = {
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="翻轉命運 30 年 (Flip Your Destiny)", page_icon="💎TS＿IFRC💎", layout="wide", initial_sidebar_state="collapsed")
 
-# --- 2. ✨ 網美級 CSS (修復版) ✨ ---
+# --- 2. ✨ 網美級 CSS (最終完美版) ✨ ---
 st.markdown("""
     <style>
     /* A. 背景：極光流體漸層 */
@@ -43,91 +43,89 @@ st.markdown("""
         100% {background-position: 0% 50%;}
     }
 
-    /* B. 標題：修復清晰度與隱藏連結符號 */
+    /* B. 標題：清晰度修復 */
     h1 {
         font-family: 'Helvetica Neue', sans-serif;
         font-weight: 900 !important;
-        font-size: 4rem !important; /* 字體加大 */
-        color: #FFFFFF !important; /* 純白色 */
-        /* 使用強烈的黑色陰影來提升對比度 */
-        text-shadow: 2px 2px 8px rgba(0,0,0,0.6);
+        font-size: 4rem !important;
+        color: #FFFFFF !important;
+        text-shadow: 4px 4px 10px rgba(0,0,0,0.8); /* 加重陰影 */
         text-align: center;
         margin-bottom: 10px !important;
     }
+    /* 隱藏討厭的連結符號 */
+    h1 a, h2 a, h3 a { display: none !important; }
     
-    /* 神奇代碼：隱藏標題旁邊的連結符號 🔗 */
-    h1 a, h2 a, h3 a {
-        display: none !important;
-    }
-    
-    h3 {
-        font-weight: 700 !important;
-        color: #fff !important;
-        text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
-    }
-    
-    /* 副標題樣式優化 */
     .subtitle {
-        text-align: center;
-        color: rgba(255,255,255,0.9);
-        margin-top: -15px;
-        margin-bottom: 30px;
-        font-size: 1.2rem;
-        font-weight: 500;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        text-align: center; color: rgba(255,255,255,0.95);
+        margin-top: -15px; margin-bottom: 30px;
+        font-size: 1.3rem; font-weight: 600;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
     }
 
-    /* C. 毛玻璃卡片 (Glassmorphism) */
+    /* C. 毛玻璃卡片 */
     div[data-testid="stExpander"], div[data-testid="stContainer"] {
-        background: rgba( 255, 255, 255, 0.15 );
+        background: rgba( 255, 255, 255, 0.1 );
         box-shadow: 0 8px 32px 0 rgba( 31, 38, 135, 0.37 );
-        backdrop-filter: blur( 12px );
-        -webkit-backdrop-filter: blur( 12px );
+        backdrop-filter: blur( 10px );
+        -webkit-backdrop-filter: blur( 10px );
         border-radius: 20px;
-        border: 1px solid rgba( 255, 255, 255, 0.18 );
-        padding: 25px;
+        border: 1px solid rgba( 255, 255, 255, 0.2 );
+        padding: 20px;
         margin-bottom: 20px;
     }
 
-    /* D. 數據指標 (Metrics) - 巨大化與霓虹感 */
+    /* D. 數據指標 */
     div[data-testid="stMetricLabel"] {
         color: rgba(255,255,255,0.9) !important;
-        font-size: 1.2rem !important;
-        font-weight: 600;
+        font-size: 1.1rem !important; font-weight: 600;
+        text-shadow: 1px 1px 2px black;
     }
     div[data-testid="stMetricValue"] {
-        font-size: 3rem !important;
-        color: #ffffff !important;
+        font-size: 2.8rem !important; color: #ffffff !important;
         font-family: 'Futura', sans-serif;
-        text-shadow: 0 0 10px rgba(255,255,255,0.5);
+        text-shadow: 2px 2px 5px rgba(0,0,0,0.8);
     }
 
-    /* E. 按鈕：膠囊漸層按鈕 */
+    /* E. 按鈕美化 */
     div.stButton > button {
         background: linear-gradient(90deg, #FDC830 0%, #F37335 100%);
-        border: none;
-        color: white;
-        padding: 15px 32px;
-        font-size: 20px;
-        border-radius: 50px;
-        box-shadow: 0 10px 20px rgba(243, 115, 53, 0.4);
-        transition: transform 0.2s;
-        width: 100%;
-        font-weight: bold;
+        border: none; color: white; padding: 15px 32px;
+        font-size: 20px; border-radius: 50px;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        width: 100%; font-weight: bold;
     }
     div.stButton > button:hover {
-        transform: scale(1.05);
+        transform: scale(1.02);
         background: linear-gradient(90deg, #F37335 0%, #FDC830 100%);
     }
 
-    /* F. 進度條顏色 */
+    /* F. 進度條 */
     div[data-testid="stProgress"] > div > div {
         background-color: #00FFD1 !important;
     }
     
-    /* G. 側邊欄隱藏背景 */
-    section[data-testid="stSidebar"] {
-        background-color: #0E1117;
+    /* G. 側邊欄 */
+    section[data-testid="stSidebar"] { background-color: #0E1117; }
+
+    /* H. ✨✨ 重點修復：提示框 (st.info) ✨✨ */
+    div[data-testid="stAlert"] {
+        background-color: rgba(0, 0, 0, 0.7) !important; /* 深黑底，對比強 */
+        color: #ffffff !important;
+        border: 2px solid #FFD700 !important; /* 金色邊框 */
+        border-radius: 15px;
+        padding: 20px;
+    }
+    /* 讓提示框裡面的文字變大、變亮白 */
+    div[data-testid="stAlert"] p, div[data-testid="stAlert"] div {
+        color: #ffffff !important;
+        font-size: 1.3rem !important;
+        font-weight: bold !important;
+        text-shadow: 1px 1px 2px black;
+    }
+    /* 讓提示框的 icon 變金色 */
+    div[data-testid="stAlert"] svg {
+        fill: #FFD700 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -148,8 +146,8 @@ with st.sidebar:
     st.json(BASE_RATES)
 
 # --- 主標題區 (使用新的 class) ---
-st.title("💰翻轉命運 30 年 (Flip Your Destiny)")
-st.markdown("<div class='subtitle'>Design Your Financial Future_TS_IFRC_天行</div>", unsafe_allow_html=True)
+st.title("💰翻轉命運 30 年 (Flip Your Destiny)💰")
+st.markdown("<div class='subtitle'>TS_IFRC_天行</div>", unsafe_allow_html=True)
 st.write("")
 
 # ==========================================
@@ -164,10 +162,10 @@ if st.session_state.stage == 'setup':
             initial_wealth = st.number_input("輸入初始資金", value=1000000, step=100000, label_visibility="collapsed")
             
             st.markdown("---")
-            st.markdown("### 🎨 ASSET ALLOCATION (Max 100%)")
+            st.markdown("### 🏦 資產配置 (Max 100%)")
             
             c1, c2, c3, c4, c5 = st.columns(5)
-            p1 = c1.number_input(f"🍇 {ASSET_NAMES['Dividend']}", 0, 100, 20)
+            p1 = c1.number_input(f"💵 {ASSET_NAMES['Dividend']}", 0, 100, 20)
             p2 = c2.number_input(f"🧊 {ASSET_NAMES['USBond']}", 0, 100, 20)
             p3 = c3.number_input(f"🔥 {ASSET_NAMES['TWStock']}", 0, 100, 20)
             p4 = c4.number_input(f"🥥 {ASSET_NAMES['Cash']}", 0, 100, 20)
@@ -180,7 +178,7 @@ if st.session_state.stage == 'setup':
                 st.progress(min(total_p/100, 1.0))
             else:
                 st.write("")
-                if st.button("✨ GO TO THE MOON ✨"):
+                if st.button("✨ 通往財富自由之路 ✨"):
                     props = [p1, p2, p3, p4, p5]
                     for i, key in enumerate(ASSET_KEYS):
                         st.session_state.assets[key] = initial_wealth * (props[i] / 100)
@@ -202,9 +200,9 @@ elif st.session_state.stage == 'playing':
     
     with st.container():
         c1, c2, c3 = st.columns(3)
-        c1.metric("YEAR", f"{st.session_state.year} / 30")
-        c2.metric("TOTAL WEALTH", f"${int(total):,}")
-        c3.metric("ROI", f"{roi:.1f}%", delta_color="off")
+        c1.metric("年份", f"{st.session_state.year} / 30")
+        c2.metric("財富累積", f"${int(total):,}")
+        c3.metric("報酬率", f"{roi:.1f}%", delta_color="off")
         st.progress(st.session_state.year / 30)
 
     # 圖表
@@ -230,6 +228,7 @@ elif st.session_state.stage == 'playing':
                 x="Year", 
                 y="Value", 
                 color="Asset_Name",
+                title="📈 ASSET GROWTH TRACKER",
                 # 自訂顏色 (保持你的網美配色)
                 color_discrete_map={
                     '分紅': '#FF6B6B', '美債': '#4ECDC4', '台股': '#FFE66D',
@@ -284,7 +283,7 @@ elif st.session_state.stage == 'playing':
             fig.update_traces(hovertemplate="%{y:,.0f}") 
 
             st.plotly_chart(fig, use_container_width=True)
-            
+
     st.write("")
     current_year = st.session_state.year
     
@@ -292,11 +291,11 @@ elif st.session_state.stage == 'playing':
         # A. 跑分階段
         if current_year in [0, 10, 20] and not st.session_state.get('waiting_for_event', False):
             with st.container():
-                st.markdown(f"### ⚡ LEVEL UP: Year {current_year+1} - {current_year+10}")
-                st.caption("Auto-compounding with base rates...")
+                st.markdown(f"### ⚡ 下一個階段: Year {current_year+1} - {current_year+10}")
+                st.caption("複利計算中... 模擬十年後的資產變化")
                 
                 col_btn, _ = st.columns([1, 0.1])
-                if col_btn.button(f"⏩ FAST FORWARD 10 YEARS"):
+                if col_btn.button(f"⏩ 十年之後..."):
                     for y in range(1, 11):
                         st.session_state.assets['Dividend'] *= (1 + BASE_RATES['Dividend']) * np.random.uniform(0.98, 1.02)
                         st.session_state.assets['USBond']   *= (1 + BASE_RATES['USBond']) * np.random.uniform(0.95, 1.05)
@@ -315,7 +314,7 @@ elif st.session_state.stage == 'playing':
         # B. 抽卡階段
         elif st.session_state.get('waiting_for_event', False):
             with st.container():
-                st.markdown(f"<h2 style='text-align:center; color:#FFD700;'>🃏 DESTINY MOMENT: Year {current_year}</h2>", unsafe_allow_html=True)
+                st.markdown(f"<h2 style='text-align:center; color:#FFD700;'>🃏 大事件: Year {current_year}</h2>", unsafe_allow_html=True)
                 
                 selected_card = st.selectbox("Select Event Card", list(EVENT_CARDS.keys()), label_visibility="collapsed")
                 card_data = EVENT_CARDS[selected_card]
@@ -329,7 +328,7 @@ elif st.session_state.stage == 'playing':
                 c4.metric("現金", f"{card_data['cash']}%")
                 c5.metric("加密", f"{card_data['crypto']}%")
                 
-                if st.button("💥 APPLY IMPACT"):
+                if st.button("💥 選擇卡牌！"):
                     st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
                     st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
                     st.session_state.assets['TWStock']  *= (1 + card_data['stock']/100)
