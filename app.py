@@ -111,29 +111,56 @@ if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
 if 'config_history' not in st.session_state: st.session_state.config_history = {}
 if 'data_saved' not in st.session_state: st.session_state.data_saved = False # 防止重複存檔
 
-# --- 側邊欄 (主持人秘密基地) ---
+# --- 側邊欄 (加密版主持人後台) ---
+ADMIN_PASSWORD = "tsts"  # 👈 你可以在這裡修改密碼！
+
+if 'admin_unlocked' not in st.session_state:
+    st.session_state.admin_unlocked = False
+
 with st.sidebar:
     st.header("🕵️‍♂️ 主持人後台")
-    st.info("這裡可以查看所有玩家的紀錄")
     
-    if os.path.exists(CSV_FILE):
-        df_record = pd.read_csv(CSV_FILE)
-        st.write(f"目前已有 {len(df_record)} 筆資料")
+    # 如果還沒解鎖，顯示密碼框
+    if not st.session_state.admin_unlocked:
+        st.info("🔒 此區域受密碼保護")
+        pwd_input = st.text_input("請輸入管理員密碼", type="password", key="admin_pwd_input")
         
-        # 下載按鈕
-        with open(CSV_FILE, "rb") as file:
-            st.download_button(
-                label="📥 下載 Excel (CSV) 檔",
-                data=file,
-                file_name="game_results.csv",
-                mime="text/csv"
-            )
-        
-        # 預覽數據
-        with st.expander("查看數據預覽"):
-            st.dataframe(df_record)
+        if pwd_input:
+            if pwd_input == ADMIN_PASSWORD:
+                st.session_state.admin_unlocked = True
+                st.rerun()  # 密碼對了，刷新頁面進入後台
+            else:
+                st.error("❌ 密碼錯誤，請重新輸入")
+    
+    # 如果已經解鎖，顯示資料
     else:
-        st.write("尚無資料")
+        st.success("✅ 已登入管理員模式")
+        
+        # 顯示資料功能
+        if os.path.exists(CSV_FILE):
+            df_record = pd.read_csv(CSV_FILE)
+            st.write(f"📊 目前紀錄：{len(df_record)} 筆")
+            
+            # 下載按鈕
+            with open(CSV_FILE, "rb") as file:
+                st.download_button(
+                    label="📥 下載 Excel (CSV) 檔",
+                    data=file,
+                    file_name="game_results.csv",
+                    mime="text/csv"
+                )
+            
+            # 預覽數據
+            with st.expander("🔎 查看詳細數據表"):
+                st.dataframe(df_record)
+        else:
+            st.warning("📭 目前尚無任何遊戲紀錄")
+            
+        st.markdown("---")
+        # 登出按鈕
+        if st.button("🔒 鎖定後台 (登出)"):
+            st.session_state.admin_unlocked = False
+            st.rerun()
 
 # --- 標題 ---
 st.markdown("""
@@ -402,7 +429,7 @@ elif st.session_state.stage == 'finished':
         st.markdown("### 📝 請輸入反饋以完成紀錄")
         feedback = st.text_area("心得 / 建議", placeholder="寫下你的心得...")
         
-        # 存檔按鈕
+# 存檔按鈕
         if st.button("💾 送出紀錄並結束"):
             if not st.session_state.data_saved:
                 # 呼叫存檔函數
@@ -416,10 +443,12 @@ elif st.session_state.stage == 'finished':
                 )
                 st.session_state.data_saved = True
                 st.success("✅ 資料已自動儲存到後台！")
+                
+                # --- ✨ 新增這兩行：讓它停 1 秒後自動刷新頁面 ✨ ---
+                import time
+                time.sleep(1) # 讓玩家看清楚「成功」的綠色訊息
+                st.rerun()    # 強制重整，側邊欄就會更新了
+                # ---------------------------------------------
+                
             else:
                 st.info("您已經送出過了喔！")
-
-    if st.button("🔄 換下一位玩家 (重新開始)"):
-        for key in st.session_state.keys():
-            del st.session_state[key]
-        st.rerun()
