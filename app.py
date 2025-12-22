@@ -227,7 +227,7 @@ with st.sidebar:
 # --- 標題 ---
 st.markdown("""
     <div style="text-align: center; padding: 20px 0 40px 0;">
-        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 翻轉命運 30 年</h1>
+        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 扭轉命運 30 年</h1>
         <div style="color: #6B7280; font-size: 1.2rem; font-weight: 500;">Wealth Management Simulation</div>
     </div>
 """, unsafe_allow_html=True)
