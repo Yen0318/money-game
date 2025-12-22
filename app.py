@@ -13,7 +13,6 @@ BASE_RATES = {
     'Dividend': 0.05, 'USBond': 0.04, 'TWStock': 0.08, 'Cash': 0.01, 'Crypto': 0.15
 }
 
-# 🔥 已根據表格更新事件卡數據
 EVENT_CARDS = {
     "101": {"name": "US FED降息3%",      "dividend": 7,  "bond": 2,  "stock": 20,   "cash": 0,  "crypto": 100,   "desc": "💸 資金大放水！市場流動性暴增，風險資產狂噴。"},
     "102": {"name": "AI晶片大戰",        "dividend": 6,  "bond": 5,  "stock": -30,  "cash": -1, "crypto": -80,   "desc": "🤖 科技霸權爭奪，供應鏈大亂，科技股與幣圈重挫。"},
@@ -90,8 +89,6 @@ st.markdown("""
     }
     
     /* --- 按鈕樣式強力修正區 Start --- */
-    
-    /* 1. 一般按鈕 (白色底，深色字) */
     div.stButton > button {
         background-color: white;
         color: var(--text-main);
@@ -107,23 +104,17 @@ st.markdown("""
         border-color: var(--primary);
         color: var(--primary);
     }
-
-    /* 2. Primary 按鈕 (藍色底) - 設定背景 */
     div.stButton > button[kind="primary"] {
         background: linear-gradient(135deg, var(--primary), var(--primary-dark)) !important;
         border: none !important;
         box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
     }
-
-    /* 🔥 3. 強力覆蓋：Primary 按鈕內的文字顏色 🔥 */
     div.stButton > button[kind="primary"],
     div.stButton > button[kind="primary"] > div,
     div.stButton > button[kind="primary"] p {
         color: #FFFFFF !important;
         fill: #FFFFFF !important;
     }
-
-    /* 4. Hover 狀態修正 */
     div.stButton > button[kind="primary"]:hover {
         box-shadow: 0 6px 10px rgba(37, 99, 235, 0.3) !important;
     }
@@ -132,8 +123,6 @@ st.markdown("""
     div.stButton > button[kind="primary"]:hover p {
         color: #FFFFFF !important;
     }
-    
-    /* 5. Focus/Active 狀態修正 */
     div.stButton > button[kind="primary"]:focus:not(:active) {
         border-color: transparent !important;
         color: #FFFFFF !important;
@@ -186,7 +175,8 @@ def render_asset_snapshot(current_assets, title="📊 當前資產快照"):
         fig_snap.update_layout(
             showlegend=False, margin=dict(l=0, r=0, t=0, b=0), height=200,
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            annotations=[dict(text='資產分佈', x=0.5, y=0.5, font_size=14, showarrow=False)]
+            annotations=[dict(text='資產分佈', x=0.5, y=0.5, font_size=14, showarrow=False, font=dict(color='#1F2937'))],
+            font=dict(color='#1F2937')
         )
         fig_snap.update_traces(textinfo='percent+label', textposition='inside')
         st.plotly_chart(fig_snap, use_container_width=True)
@@ -227,41 +217,32 @@ with st.sidebar:
 # --- 標題 ---
 st.markdown("""
     <div style="text-align: center; padding: 20px 0 40px 0;">
-        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 扭轉命運 30 年</h1>
+        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 翻轉命運 30 年</h1>
         <div style="color: #6B7280; font-size: 1.2rem; font-weight: 500;">Wealth Management Simulation</div>
     </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 階段 0: 登入 (Login) 🔥 修改處：更新參數名稱
+# 階段 0: 登入
 # ==========================================
 if st.session_state.stage == 'login':
     with st.container():
-        # 1. 歡迎文字
         st.markdown("<div style='text-align: center; margin-bottom: 10px;'>👋 歡迎來到資產模擬挑戰</div>", unsafe_allow_html=True)
         
-        # 2. 圖片區 (使用 Columns 讓圖片置中且控制大小)
-        # [1, 2, 1] 的比例意思是：左邊空1份、中間放圖佔2份、右邊空1份
-        img_c1, img_c2, img_c3 = st.columns([1, 0.8, 1])
-        
+        img_c1, img_c2, img_c3 = st.columns([1, 2, 1])
         with img_c2:
             image_path = "images/homepage.png"
             if os.path.exists(image_path):
-                # 🔥 這裡改成 use_container_width=True
                 st.image(image_path, use_container_width=True) 
             else:
                 st.info("📷 圖片讀取中...")
 
-        # 3. 輸入框與按鈕區
         st.markdown("<div style='text-align: center; color: #6B7280; font-size: 0.9rem; margin-bottom: 20px;'>扭轉命運的機會就在眼前，準備好了嗎？</div>", unsafe_allow_html=True)
         
-        # 為了讓輸入框也不要太長，我們也稍微限縮一下寬度
         input_c1, input_c2, input_c3 = st.columns([1, 2, 1])
         with input_c2:
             name_input = st.text_input("請輸入玩家暱稱", placeholder="例如: 小明", key="login_name")
-            st.write("") # 空行
-            
-            # 按鈕 (白字藍底)
+            st.write("")
             if st.button("▶ 確認並開始", type="primary"):
                 if name_input.strip():
                     st.session_state.user_name = name_input
@@ -270,6 +251,7 @@ if st.session_state.stage == 'login':
                     st.rerun()
                 else:
                     st.warning("⚠️ 請輸入暱稱以開始遊戲")
+
 # ==========================================
 # 階段 1: Setup
 # ==========================================
@@ -335,14 +317,19 @@ elif st.session_state.stage == 'playing':
             render_asset_snapshot(st.session_state.assets, title="📊 衝擊前資產快照")
             st.markdown("---")
             
+            # 🔥 修改處：增加輸入框的提示 (Label + Help + Placeholder)
             col_input, col_status = st.columns([2, 1])
-            input_code = col_input.text_input("請輸入事件卡代碼", placeholder="例如: 101", label_visibility="collapsed")
+            input_code = col_input.text_input(
+                "請在此輸入卡片代碼 (3碼)", # Label 提示
+                placeholder="例如: 101", 
+                help="請查看您抽到的實體卡片，輸入上面的3位數編號 (例如 101, 102...)"
+            )
             clean_code = str(input_code).strip()
             
             if clean_code in EVENT_CARDS:
                 card_data = EVENT_CARDS[clean_code]
                 image_path = f"images/{clean_code}.png"
-                col_img, col_desc = st.columns([2, 3])
+                col_img, col_desc = st.columns([1, 2])
                 with col_img:
                     if os.path.exists(image_path): st.image(image_path, use_container_width=True)
                     else: st.info("📷 No Image")
@@ -453,7 +440,6 @@ elif st.session_state.stage == 'playing':
     st.markdown("---")
     if len(st.session_state.history) > 0:
         with st.container():
-            # 🔥 Year 0 特殊佈局: 資產快照放在最上面
             if current_year == 0:
                 render_asset_snapshot(st.session_state.assets, title="📊 當前資產配置")
                 st.markdown("---")
@@ -467,7 +453,8 @@ elif st.session_state.stage == 'playing':
             fig.update_layout(
                 hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
                 margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s")
+                xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s"),
+                font=dict(color='#1F2937')
             )
             fig.update_traces(hovertemplate="%{y:,.0f}")
             st.plotly_chart(fig, use_container_width=True)
