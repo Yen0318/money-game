@@ -67,36 +67,46 @@ if 'user_name' not in st.session_state: st.session_state.user_name = ""
 if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
 if 'config_history' not in st.session_state: st.session_state.config_history = {}
 if 'data_saved' not in st.session_state: st.session_state.data_saved = False
+# 🔥 新增：確保 waiting_for_rebalance 變數存在
+if 'waiting_for_rebalance' not in st.session_state: st.session_state.waiting_for_rebalance = False
 
 # 2. 捲動偵測變數
 if 'last_stage' not in st.session_state: st.session_state.last_stage = st.session_state.stage
 if 'last_year' not in st.session_state: st.session_state.last_year = st.session_state.year
+# 🔥 新增：偵測再平衡狀態的改變
+if 'last_rebalance' not in st.session_state: st.session_state.last_rebalance = st.session_state.waiting_for_rebalance
 
 # ==========================================
-# 📜 捲動控制函數 (Brute Force Scroll)
+# 📜 捲動控制函數 (Smart & Strong Scroll)
 # ==========================================
 def scroll_to_top():
     # 1. 埋下錨點
     st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
     
-    # 2. 檢查是否發生「換頁」或「年份變更」
+    # 2. 檢查是否發生「換頁」、「年份變更」或「進入再平衡階段」
     should_scroll = False
+    
     if st.session_state.stage != st.session_state.last_stage:
         should_scroll = True
     elif st.session_state.year != st.session_state.last_year:
         should_scroll = True
+    elif st.session_state.waiting_for_rebalance != st.session_state.last_rebalance:
+        # 🔥 新增：當從抽卡畫面(False)變成調整畫面(True)時，觸發捲動
+        should_scroll = True
         
-    # 如果只是調整滑桿 (狀態未變)，更新紀錄並退出，不執行 JS
+    # 如果只是單純調整滑桿(狀態未變)，同步紀錄後退出，不執行 JS
     if not should_scroll:
         st.session_state.last_stage = st.session_state.stage
         st.session_state.last_year = st.session_state.year
+        st.session_state.last_rebalance = st.session_state.waiting_for_rebalance
         return
 
-    # 3. 確實換頁了，更新狀態
+    # 3. 確實進入新階段了，更新狀態
     st.session_state.last_stage = st.session_state.stage
     st.session_state.last_year = st.session_state.year
+    st.session_state.last_rebalance = st.session_state.waiting_for_rebalance
 
-    # 4. 執行霸道捲動 JS (連續執行 1 秒，對抗手機渲染延遲)
+    # 4. 執行霸道捲動 JS (連續執行 1 秒)
     js = f"""
     <script>
         var timestamp = {time.time()};
@@ -113,11 +123,10 @@ def scroll_to_top():
             }}
         }}
 
-        // 立即執行一次
+        // 立即執行
         forceScroll();
         
-        // 設定連續轟炸：每 50 毫秒執行一次，持續 20 次 (共 1 秒)
-        // 這樣可以確保等圖表載入完、畫面撐開後，依然會被拉回最上面
+        // 連續轟炸 1 秒 (對抗手機渲染延遲)
         var count = 0;
         var intervalId = setInterval(function(){{
             forceScroll();
@@ -128,7 +137,7 @@ def scroll_to_top():
     """
     components.html(js, height=0)
 
-# 🔥 立即執行
+# 🔥 立即執行捲動檢查
 scroll_to_top()
 
 # ---------------- 下方接續 CSS 設定與主程式 ----------------
