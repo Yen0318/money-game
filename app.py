@@ -591,10 +591,10 @@ elif st.session_state.stage == 'finished':
                 )
                 fig_alloc.update_layout(
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#040405"),
+                    font=dict(color="#000000"),
                     margin=dict(t=30, b=0, l=0, r=0)
                 )
-                st.plotly_chart(fig_alloc, use_container_width=True)
+                st.plotly_chart(fig_alloc, use_container_width=True, theme=None)
                 
             with c_table:
                 st.write("詳細配置數據 (%)")
@@ -618,7 +618,7 @@ elif st.session_state.stage == 'finished':
             xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s"),
             font=dict(color="#060606")
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, theme=None)
 
         st.markdown("---")
         st.subheader("🎴 命運歷程回顧")
