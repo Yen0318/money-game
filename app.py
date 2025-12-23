@@ -376,7 +376,7 @@ if st.session_state.stage == 'login':
             <div style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                 <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">製作團隊IFRCxTS</div>
                 🔹 <b>總策劃：</b>Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
-                🔹 <b>技術支援：</b> Yen <br>
+                🔹 <b>技術支援：</b> Yen 🔹 <b>美術支援：</b> Liya <br> 
                 🔹 <b>遊戲設計：</b> 天行 & IFRC<br>
             </div>
         </div>
