@@ -604,7 +604,7 @@ elif st.session_state.stage == 'finished':
         rank_title = "🐢 佛系定存族"
         rank_desc = "這30年你只贏了帳面，卻輸給了真實通膨。"
         bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
-    elif roi < 700:
+    elif roi < 400:
         rank_title = "💼 理財階級"
         rank_desc = "表現穩健！這是大多數普通人退休目標。"
         bg_gradient = "linear-gradient(135deg, #059669, #34d399)" # 穩健綠
