@@ -342,6 +342,18 @@ if st.session_state.stage == 'login':
                 else:
                     st.warning("⚠️ 請輸入暱稱以開始遊戲")
 
+        # 👇 在登入按鈕下方加入這段
+        st.markdown("---")
+        st.markdown("""
+        <div style="text-align: center; color: #9CA3AF; font-size: 13px; margin-top: 20px;">
+            <div style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">🚀 製作團隊</div>
+                🔹 <b>總策劃：</b> IFRC：Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
+                🔹 <b>技術支援：</b> Yen <br>
+                🔹 <b>遊戲設計：</b> 天行 & IFRC<br>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 # ==========================================
 # 階段 1: Setup
 # ==========================================
@@ -387,7 +399,8 @@ elif st.session_state.stage == 'setup':
 
         col_cap, col_space = st.columns([1, 2])
         with col_cap:
-            initial_wealth = st.number_input("💰 起始資金", value=1000000, step=100000, format="%d")
+            initial_wealth = 1000000
+            st.metric("💰 起始資金 (固定)", f"${initial_wealth:,}", help="所有玩家起跑點皆相同")
         
         st.markdown("#### 📊 第 0 年資產比例配置 (%)")
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -758,3 +771,21 @@ elif st.session_state.stage == 'finished':
     if st.button("🔄 開啟新挑戰"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
+# ------------------------------------------------
+# 🦶 頁尾 Footer (放在程式碼最後面，縮排最外層)
+# ------------------------------------------------
+st.markdown("""
+    <div style="
+        text-align: center; 
+        margin-top: 60px; 
+        padding-bottom: 30px; 
+        color: #D1D5DB; /* 淺灰色 */
+        font-size: 13px; 
+        font-weight: 600;
+        font-family: 'Inter', sans-serif;
+        letter-spacing: 2px;
+        opacity: 0.8;
+    ">
+        IFRC <span style="color: #F59E0B;">x</span> TS
+    </div>
+""", unsafe_allow_html=True)       
