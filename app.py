@@ -307,8 +307,35 @@ with st.sidebar:
 # --- 標題 ---
 st.markdown("""
     <div style="text-align: center; padding: 20px 0 40px 0;">
-        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 扭轉命運 30 年</h1>
-        <div style="color: #6B7280; font-size: 1.2rem; font-weight: 500;">Wealth Management Simulation</div>
+        <div style="
+            font-size: 0.9rem; 
+            font-weight: 800; 
+            color: #9CA3AF; 
+            letter-spacing: 3px; 
+            margin-bottom: 8px;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+        ">
+            IFRC <span style="color: #F59E0B;">x</span> TS
+        </div>
+        <h1 style="
+            font-size: 2.5rem; 
+            color: #1E40AF; 
+            font-weight: 800; 
+            letter-spacing: -0.5px; 
+            margin: 0;
+            padding: 0;
+        ">
+            💰 扭轉命運 30 年
+        </h1>
+        <div style="
+            color: #6B7280; 
+            font-size: 1.2rem; 
+            font-weight: 500; 
+            margin-top: 8px;
+        ">
+            Wealth Management Simulation
+        </div>
     </div>
 """, unsafe_allow_html=True)
 
@@ -317,7 +344,7 @@ st.markdown("""
 # ==========================================
 if st.session_state.stage == 'login':
     with st.container():
-        st.markdown("<div style='text-align: center; margin-bottom: 10px;'>👋 歡迎來到資產模擬挑戰</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align: center; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
         
         img_c1, img_c2, img_c3 = st.columns([1, 1, 1])
         with img_c2:
@@ -347,8 +374,8 @@ if st.session_state.stage == 'login':
         st.markdown("""
         <div style="text-align: center; color: #9CA3AF; font-size: 13px; margin-top: 20px;">
             <div style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">🚀 製作團隊</div>
-                🔹 <b>總策劃：</b> IFRC:Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
+                <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">製作團隊IFRCxTS</div>
+                🔹 <b>總策劃：</b>Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
                 🔹 <b>技術支援：</b> Yen <br>
                 🔹 <b>遊戲設計：</b> 天行 & IFRC<br>
             </div>
@@ -665,9 +692,17 @@ elif st.session_state.stage == 'finished':
         rank_desc = "這30年你只贏了帳面，卻輸給了真實通膨。"
         bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
     elif roi < 400:
-        rank_title = "💼 理財階級"
+        rank_title = "💼 理財小白"
+        rank_desc = "表現穩健！開始有資產配置觀念。"
+        bg_gradient = "linear-gradient(135deg, #059669, #34d399)" # 穩健綠    
+    elif roi < 600:
+        rank_title = "💼 理財老手"
         rank_desc = "表現穩健！這是大多數普通人退休目標。"
         bg_gradient = "linear-gradient(135deg, #059669, #34d399)" # 穩健綠
+    elif roi < 800:
+        rank_title = "🚀 投資理財老鳥"
+        rank_desc = "眼光精準！你的資產成長速度驚人。"
+        bg_gradient = "linear-gradient(135deg, #7c3aed, #a78bfa)" # 尊爵紫    
     elif roi < 1200:
         rank_title = "🚀 自由財富號"
         rank_desc = "眼光精準！你的資產成長速度驚人。"
