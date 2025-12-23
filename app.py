@@ -348,11 +348,47 @@ if st.session_state.stage == 'login':
 elif st.session_state.stage == 'setup':
     with st.container():
         st.markdown(f"### 🚀 初始資產配置 (玩家: {st.session_state.user_name})")
+        
+        # --- 🔥 新增：基礎利率參考表 ---
+        st.markdown("#### ℹ️ 市場基礎利率表 (無事件影響下)")
+        st.caption("這是各類資產在「風平浪靜」時的理論年化報酬率，請作為配置參考。")
+        
+        # 準備表格數據
+        rate_data = []
+        risk_map = {
+            'Dividend': '低 (穩定現金流)',
+            'USBond': '極低 (避險首選)',
+            'TWStock': '中高 (隨景氣波動)',
+            'Cash': '無 (會被通膨侵蝕)',
+            'Crypto': '極高 (心跳漏一拍)'
+        }
+        
+        for key in ASSET_KEYS:
+            rate_data.append({
+                "資產項目": ASSET_NAMES[key],
+                "基礎年化報酬": f"{int(BASE_RATES[key]*100)}%",
+                "風險屬性": risk_map.get(key, "未知")
+            })
+            
+        df_rates = pd.DataFrame(rate_data)
+        
+        # 顯示表格 (use_container_width讓表格撐滿寬度，看起來比較大器)
+        st.dataframe(
+            df_rates, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "資產項目": st.column_config.TextColumn("資產項目", help="資產的種類"),
+                "基礎年化報酬": st.column_config.TextColumn("基礎年化報酬", help="每年預期會自動增長的比例"),
+            }
+        )
+        st.markdown("---")
+        # ----------------------------------
+
         col_cap, col_space = st.columns([1, 2])
         with col_cap:
             initial_wealth = st.number_input("💰 起始資金", value=1000000, step=100000, format="%d")
         
-        st.markdown("---")
         st.markdown("#### 📊 第 0 年資產比例配置 (%)")
         c1, c2, c3, c4, c5 = st.columns(5)
         p1 = c1.number_input(f"{ASSET_NAMES['Dividend']}", 0, 100, 20)
