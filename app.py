@@ -345,94 +345,68 @@ if st.session_state.stage == 'login':
 # ==========================================
 # 階段 1: Setup
 # ==========================================
-# ==========================================
-# 階段 1: Setup (滑桿拖曳版)
-# ==========================================
 elif st.session_state.stage == 'setup':
     with st.container():
         st.markdown(f"### 🚀 初始資產配置 (玩家: {st.session_state.user_name})")
         
-        # --- 1. 基礎利率參考表 ---
+        # --- 🔥 新增：基礎利率參考表 ---
         st.markdown("#### ℹ️ 市場基礎利率表 (無事件影響下)")
-        with st.expander("點擊查看詳細利率資訊", expanded=True):
-            rate_data = []
-            risk_map = {
-                'Dividend': '低 (穩定現金流)', 'USBond': '極低 (避險首選)',
-                'TWStock': '中高 (隨景氣波動)', 'Cash': '無 (會被通膨侵蝕)',
-                'Crypto': '極高 (心跳漏一拍)'
+        st.caption("這是各類資產在「風平浪靜」時的理論年化報酬率，請作為配置參考。")
+        
+        # 準備表格數據
+        rate_data = []
+        risk_map = {
+            'Dividend': '低 (穩定現金流)',
+            'USBond': '極低 (避險首選)',
+            'TWStock': '中高 (隨景氣波動)',
+            'Cash': '無 (會被通膨侵蝕)',
+            'Crypto': '極高 (心跳漏一拍)'
+        }
+        
+        for key in ASSET_KEYS:
+            rate_data.append({
+                "資產項目": ASSET_NAMES[key],
+                "基礎年化報酬": f"{int(BASE_RATES[key]*100)}%",
+                "風險屬性": risk_map.get(key, "未知")
+            })
+            
+        df_rates = pd.DataFrame(rate_data)
+        
+        # 顯示表格 (use_container_width讓表格撐滿寬度，看起來比較大器)
+        st.dataframe(
+            df_rates, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "資產項目": st.column_config.TextColumn("資產項目", help="資產的種類"),
+                "基礎年化報酬": st.column_config.TextColumn("基礎年化報酬", help="每年預期會自動增長的比例"),
             }
-            for key in ASSET_KEYS:
-                rate_data.append({
-                    "資產項目": ASSET_NAMES[key],
-                    "基礎年化報酬": f"{int(BASE_RATES[key]*100)}%",
-                    "風險屬性": risk_map.get(key, "未知")
-                })
-            st.dataframe(pd.DataFrame(rate_data), hide_index=True, use_container_width=True)
-        
+        )
         st.markdown("---")
-        
-        # --- 2. 起始資金設定 ---
-        col_cap, _ = st.columns([1, 2])
+        # ----------------------------------
+
+        col_cap, col_space = st.columns([1, 2])
         with col_cap:
             initial_wealth = st.number_input("💰 起始資金", value=1000000, step=100000, format="%d")
-
-        st.markdown("#### 🎛️ 拖曳滑桿分配資產 (%)")
         
-        # --- 3. 互動式滑桿與圖表區 (Layout: 左滑桿 | 右圓餅圖) ---
-        c_sliders, c_chart = st.columns([1, 1])
+        st.markdown("#### 📊 第 0 年資產比例配置 (%)")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        p1 = c1.number_input(f"{ASSET_NAMES['Dividend']}", 0, 100, 20)
+        p2 = c2.number_input(f"{ASSET_NAMES['USBond']}", 0, 100, 20)
+        p3 = c3.number_input(f"{ASSET_NAMES['TWStock']}", 0, 100, 20)
+        p4 = c4.number_input(f"{ASSET_NAMES['Cash']}", 0, 100, 20)
+        p5 = c5.number_input(f"{ASSET_NAMES['Crypto']}", 0, 100, 20)
         
-        with c_sliders:
-            st.write("請調整各資產比例：")
-            p1 = st.slider(f"🍊 {ASSET_NAMES['Dividend']}", 0, 100, 20, key="s_div")
-            p2 = st.slider(f"🇺🇸 {ASSET_NAMES['USBond']}", 0, 100, 20, key="s_bond")
-            p3 = st.slider(f"🇹🇼 {ASSET_NAMES['TWStock']}", 0, 100, 20, key="s_stock")
-            p4 = st.slider(f"💵 {ASSET_NAMES['Cash']}", 0, 100, 20, key="s_cash")
-            p5 = st.slider(f"🪙 {ASSET_NAMES['Crypto']}", 0, 100, 20, key="s_crypto")
-            
-            # 計算總和
-            current_sum = p1 + p2 + p3 + p4 + p5
-            
-        with c_chart:
-            # 準備畫圖數據
-            df_pie = pd.DataFrame({
-                'Asset': [ASSET_NAMES['Dividend'], ASSET_NAMES['USBond'], ASSET_NAMES['TWStock'], ASSET_NAMES['Cash'], ASSET_NAMES['Crypto']],
-                'Value': [p1, p2, p3, p4, p5]
-            })
-            # 只有當總和大於 0 才畫圖，避免報錯
-            if current_sum > 0:
-                fig_setup = px.pie(
-                    df_pie, values='Value', names='Asset', 
-                    color='Asset', color_discrete_map=FINANCE_COLORS,
-                    hole=0.4
-                )
-                fig_setup.update_layout(
-                    margin=dict(t=0, b=0, l=0, r=0), 
-                    height=250,
-                    showlegend=True,
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
-                )
-                st.plotly_chart(fig_setup, use_container_width=True, theme=None)
-            else:
-                st.info("請拖曳滑桿以分配資產")
-
-        # --- 4. 總和檢核與開始按鈕 ---
-        st.markdown("---")
-        
-        # 進度條顯示
-        bar_color = "green" if current_sum == 100 else ("red" if current_sum > 100 else "orange")
-        st.markdown(f"**目前總和: :{'green' if current_sum==100 else 'red'}[{current_sum}%]**")
-        st.progress(min(current_sum, 100) / 100)
-        
+        current_sum = p1+p2+p3+p4+p5
         if current_sum != 100:
-            diff = 100 - current_sum
-            msg = f"還差 {diff}%" if diff > 0 else f"超出 {abs(diff)}%"
-            st.warning(f"⚠️ 比例總和必須為 100% ({msg})")
-            st.button("🚫 請調整至 100% 始可開始", disabled=True)
+            st.markdown(f"""
+                <div style="background-color: #FEF2F2; color: #991B1B; padding: 12px; border-radius: 8px; border: 1px solid #FCA5A5; text-align: center; font-weight: 600;">
+                    ⚠️ 目前總和為 {current_sum}% (目標: 100%)
+                </div>
+            """, unsafe_allow_html=True)
         else:
-            st.success("✅ 配置完美！準備出發")
-            if st.button("確認並開始 🚀", type="primary"):
+            st.write("")
+            if st.button("確認並開始 ✅", type="primary"):
                 props = [p1, p2, p3, p4, p5]
                 st.session_state.config_history['Year 0'] = {k: v for k, v in zip(ASSET_KEYS, props)}
                 for i, key in enumerate(ASSET_KEYS):
