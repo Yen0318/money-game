@@ -51,15 +51,29 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         if not file_exists: writer.writeheader()
         writer.writerow(data)
 
-# --- JavaScript 捲動到頂部函數 ---
+# --- 修正後的 JavaScript 捲動到頂部函數 ---
 def scroll_to_top():
-    js = """
+    # 技巧：將時間戳 (time.time()) 直接寫入 JavaScript 的註解或變數中
+    # 這樣每次 rerun 時，js 的字串內容都會不同，Streamlit 就會強制重新執行它
+    js = f"""
     <script>
+        // Force Reload Timestamp: {time.time()}
+        
         var body = window.parent.document.querySelector(".main");
-        console.log(body);
-        body.scrollTop = 0;
+        var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
+        
+        if (body) {{
+            body.scrollTop = 0;
+        }}
+        
+        if (viewContainer) {{
+            viewContainer.scrollTop = 0;
+        }}
+        
+        window.parent.scrollTo(0, 0);
     </script>
     """
+    # 移除 key 參數，只傳入 js 與 height
     components.html(js, height=0)
 
 # --- 1. 頁面設定 ---
