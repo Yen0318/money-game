@@ -8,6 +8,9 @@ from datetime import datetime
 import plotly.express as px
 import streamlit.components.v1 as components
 
+# --- 1. 頁面設定 (必須放在所有 Streamlit 指令的第一行) ---
+st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
+
 # ==========================================
 # ⚙️ 後台設定區 (Host Control)
 # ==========================================
@@ -50,6 +53,7 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         writer = csv.DictWriter(f, fieldnames=data.keys())
         if not file_exists: writer.writeheader()
         writer.writerow(data)
+
 # ==========================================
 # ⚡️ 核心初始化區 (State Initialization)
 # ==========================================
@@ -64,58 +68,70 @@ if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
 if 'config_history' not in st.session_state: st.session_state.config_history = {}
 if 'data_saved' not in st.session_state: st.session_state.data_saved = False
 
-# 2. 捲動偵測變數 (必須在上面變數之後初始化)
+# 2. 捲動偵測變數
 if 'last_stage' not in st.session_state: st.session_state.last_stage = st.session_state.stage
 if 'last_year' not in st.session_state: st.session_state.last_year = st.session_state.year
 
 # ==========================================
-# 📜 捲動控制函數 (Smart Scroll)
+# 📜 捲動控制函數 (Brute Force Scroll)
 # ==========================================
 def scroll_to_top():
-    # 1. 無論如何都在頂部埋下錨點 (Anchor)
+    # 1. 埋下錨點
     st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
     
-    # 2. 判斷是否需要捲動
+    # 2. 檢查是否發生「換頁」或「年份變更」
     should_scroll = False
     if st.session_state.stage != st.session_state.last_stage:
         should_scroll = True
     elif st.session_state.year != st.session_state.last_year:
         should_scroll = True
         
-    # 如果偵測到只是在調整數值 (狀態沒變)，就更新狀態但不執行 JS，直接結束
+    # 如果只是調整滑桿 (狀態未變)，更新紀錄並退出，不執行 JS
     if not should_scroll:
         st.session_state.last_stage = st.session_state.stage
         st.session_state.last_year = st.session_state.year
         return
 
-    # 3. 確實換頁了，更新狀態並執行捲動
+    # 3. 確實換頁了，更新狀態
     st.session_state.last_stage = st.session_state.stage
     st.session_state.last_year = st.session_state.year
 
-    # 4. 執行 JavaScript 強制捲動
+    # 4. 執行霸道捲動 JS (連續執行 1 秒，對抗手機渲染延遲)
     js = f"""
     <script>
         var timestamp = {time.time()};
+        
         function forceScroll() {{
             var target = window.parent.document.getElementById('top-anchor');
+            var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
+            
             if (target) {{
                 target.scrollIntoView({{behavior: 'auto', block: 'start'}});
-            }} else {{
-                window.parent.scrollTo(0, 0);
-                var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
-                if (viewContainer) viewContainer.scrollTop = 0;
+            }}
+            if (viewContainer) {{
+                viewContainer.scrollTop = 0;
             }}
         }}
-        // 執行連環呼叫，確保手機版生效
+
+        // 立即執行一次
         forceScroll();
-        setTimeout(forceScroll, 100);
-        setTimeout(forceScroll, 300);
+        
+        // 設定連續轟炸：每 50 毫秒執行一次，持續 20 次 (共 1 秒)
+        // 這樣可以確保等圖表載入完、畫面撐開後，依然會被拉回最上面
+        var count = 0;
+        var intervalId = setInterval(function(){{
+            forceScroll();
+            count++;
+            if(count > 20) clearInterval(intervalId);
+        }}, 50);
     </script>
     """
     components.html(js, height=0)
 
-# 🔥 立即執行捲動檢查
+# 🔥 立即執行
 scroll_to_top()
+
+# ---------------- 下方接續 CSS 設定與主程式 ----------------
 
 # --- 2. ✨ 現代 FinTech 風格 CSS (強力修正字體顏色版) ✨ ---
 st.markdown("""
