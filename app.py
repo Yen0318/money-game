@@ -3,14 +3,16 @@ import pandas as pd
 import numpy as np
 import os
 import csv
+import time
 from datetime import datetime
 import plotly.express as px
+import streamlit.components.v1 as components
 
 # ==========================================
 # ⚙️ 後台設定區 (Host Control)
 # ==========================================
 BASE_RATES = {
-    'Dividend': 0.05, 'USBond': 0.04, 'TWStock': 0.08, 'Cash': 0.01, 'Crypto': 0.15
+    'Dividend': 0.06, 'USBond': 0.03, 'TWStock': 0.07, 'Cash': 0.0, 'Crypto': 0.1
 }
 
 EVENT_CARDS = {
@@ -49,8 +51,22 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         if not file_exists: writer.writeheader()
         writer.writerow(data)
 
+# --- JavaScript 捲動到頂部函數 ---
+def scroll_to_top():
+    js = """
+    <script>
+        var body = window.parent.document.querySelector(".main");
+        console.log(body);
+        body.scrollTop = 0;
+    </script>
+    """
+    components.html(js, height=0)
+
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
+
+# 每次重新執行都嘗試捲動到頂部
+scroll_to_top()
 
 # --- 2. ✨ 現代 FinTech 風格 CSS (強力修正字體顏色版) ✨ ---
 st.markdown("""
@@ -144,8 +160,8 @@ st.markdown("""
 
 # --- 3. 初始化 ---
 ASSET_KEYS = ['Dividend', 'USBond', 'TWStock', 'Cash', 'Crypto']
-ASSET_NAMES = {'Dividend': '高股息', 'USBond': '美債', 'TWStock': '台股', 'Cash': '現金', 'Crypto': '加密幣'}
-FINANCE_COLORS = {'高股息': '#F59E0B', '美債': '#3B82F6', '台股': '#EF4444', '現金': '#9CA3AF', '加密幣': '#8B5CF6'}
+ASSET_NAMES = {'Dividend': '分紅收益', 'USBond': '美債', 'TWStock': '台股', 'Cash': '現金', 'Crypto': '加密幣'}
+FINANCE_COLORS = {'分紅收益': '#F59E0B', '美債': '#3B82F6', '台股': '#EF4444', '現金': '#9CA3AF', '加密幣': '#8B5CF6'}
 
 if 'stage' not in st.session_state: st.session_state.stage = 'login'
 if 'year' not in st.session_state: st.session_state.year = 0
@@ -217,7 +233,7 @@ with st.sidebar:
 # --- 標題 ---
 st.markdown("""
     <div style="text-align: center; padding: 20px 0 40px 0;">
-        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 翻轉命運 30 年</h1>
+        <h1 style="font-size: 2.5rem; letter-spacing: -0.5px;">💰 扭轉命運 30 年</h1>
         <div style="color: #6B7280; font-size: 1.2rem; font-weight: 500;">Wealth Management Simulation</div>
     </div>
 """, unsafe_allow_html=True)
@@ -317,10 +333,9 @@ elif st.session_state.stage == 'playing':
             render_asset_snapshot(st.session_state.assets, title="📊 衝擊前資產快照")
             st.markdown("---")
             
-            # 🔥 修改處：增加輸入框的提示 (Label + Help + Placeholder)
             col_input, col_status = st.columns([2, 1])
             input_code = col_input.text_input(
-                "請在此輸入卡片代碼 (3碼)", # Label 提示
+                "請在此輸入卡片代碼 (3碼)",
                 placeholder="例如: 101", 
                 help="請查看您抽到的實體卡片，輸入上面的3位數編號 (例如 101, 102...)"
             )
@@ -340,7 +355,7 @@ elif st.session_state.stage == 'playing':
                 st.write("#### 📊 市場衝擊預覽 (預估損益)")
                 cols = st.columns(5)
                 key_map = {'dividend': 'Dividend', 'bond': 'USBond', 'stock': 'TWStock', 'cash': 'Cash', 'crypto': 'Crypto'}
-                metrics = [('高股息', 'dividend'), ('美債', 'bond'), ('台股', 'stock'), ('現金', 'cash'), ('加密幣', 'crypto')]
+                metrics = [('分紅收益', 'dividend'), ('美債', 'bond'), ('台股', 'stock'), ('現金', 'cash'), ('加密幣', 'crypto')]
                 
                 for i, (name, card_key) in enumerate(metrics):
                     asset_key = key_map[card_key]
@@ -380,15 +395,29 @@ elif st.session_state.stage == 'playing':
             st.markdown(f"### ⚖️ 資產再平衡配置 (Year {current_year})")
             st.markdown(f"""<div style="display: flex; align-items: center; background: #ECFDF5; padding: 15px; border-radius: 8px; color: #065F46; border: 1px solid #6EE7B7;"><span style="font-size: 1.2rem; font-weight: bold; margin-right: 10px;">目前總資產:</span><span style="font-size: 1.5rem; font-weight: 800;">${int(current_total):,}</span></div>""", unsafe_allow_html=True)
             
+            # 🔥 修改處：計算浮點數預設值，完整複製當前比例
+            current_pcts = {}
+            for k in ASSET_KEYS:
+                if current_total > 0:
+                    # 使用小數點計算，不強制轉 int
+                    current_pcts[k] = (st.session_state.assets[k] / current_total) * 100
+                else:
+                    current_pcts[k] = 20.0
+            
+            st.write("請調整下方比例 (預設為當前資產比例)：")
+            
             c1, c2, c3, c4, c5 = st.columns(5)
-            rb1 = c1.number_input(f"{ASSET_NAMES['Dividend']}", 0, 100, 20, key=f"rb1_{current_year}")
-            rb2 = c2.number_input(f"{ASSET_NAMES['USBond']}", 0, 100, 20, key=f"rb2_{current_year}")
-            rb3 = c3.number_input(f"{ASSET_NAMES['TWStock']}", 0, 100, 20, key=f"rb3_{current_year}")
-            rb4 = c4.number_input(f"{ASSET_NAMES['Cash']}", 0, 100, 20, key=f"rb4_{current_year}")
-            rb5 = c5.number_input(f"{ASSET_NAMES['Crypto']}", 0, 100, 20, key=f"rb5_{current_year}")
+            # 這裡的 input 改為 float 模式 (0.0 - 100.0)
+            rb1 = c1.number_input(f"{ASSET_NAMES['Dividend']}", 0.0, 100.0, current_pcts['Dividend'], step=1.0, format="%.1f", key=f"rb1_{current_year}")
+            rb2 = c2.number_input(f"{ASSET_NAMES['USBond']}", 0.0, 100.0, current_pcts['USBond'], step=1.0, format="%.1f", key=f"rb2_{current_year}")
+            rb3 = c3.number_input(f"{ASSET_NAMES['TWStock']}", 0.0, 100.0, current_pcts['TWStock'], step=1.0, format="%.1f", key=f"rb3_{current_year}")
+            rb4 = c4.number_input(f"{ASSET_NAMES['Cash']}", 0.0, 100.0, current_pcts['Cash'], step=1.0, format="%.1f", key=f"rb4_{current_year}")
+            rb5 = c5.number_input(f"{ASSET_NAMES['Crypto']}", 0.0, 100.0, current_pcts['Crypto'], step=1.0, format="%.1f", key=f"rb5_{current_year}")
             
             total_rb = rb1 + rb2 + rb3 + rb4 + rb5
-            if total_rb != 100: st.warning(f"⚠️ 比例總和錯誤: {total_rb}%")
+            # 浮點數比對，允許 0.01 的誤差
+            if abs(total_rb - 100.0) > 0.01: 
+                st.warning(f"⚠️ 比例總和錯誤: {total_rb:.1f}% (請手動調整至100%)")
             else:
                 st.write("")
                 if st.button("執行配置 ✅", type="primary"):
@@ -424,11 +453,11 @@ elif st.session_state.stage == 'playing':
             
             if run_simulation:
                 for y in range(1, 11):
-                    st.session_state.assets['Dividend'] *= (1 + BASE_RATES['Dividend']) * np.random.uniform(0.98, 1.02)
-                    st.session_state.assets['USBond']   *= (1 + BASE_RATES['USBond']) * np.random.uniform(0.95, 1.05)
-                    st.session_state.assets['TWStock']  *= (1 + BASE_RATES['TWStock']) * np.random.uniform(0.9, 1.1)
+                    st.session_state.assets['Dividend'] *= (1 + BASE_RATES['Dividend']) 
+                    st.session_state.assets['USBond']   *= (1 + BASE_RATES['USBond']) 
+                    st.session_state.assets['TWStock']  *= (1 + BASE_RATES['TWStock']) 
                     st.session_state.assets['Cash']     *= (1 + BASE_RATES['Cash'])
-                    st.session_state.assets['Crypto']   *= (1 + BASE_RATES['Crypto']) * np.random.uniform(0.8, 1.2)
+                    st.session_state.assets['Crypto']   *= (1 + BASE_RATES['Crypto']) 
                     record = {'Year': current_year + y, 'Total': sum(st.session_state.assets.values())}
                     record.update(st.session_state.assets)
                     st.session_state.history.append(record)
@@ -436,28 +465,10 @@ elif st.session_state.stage == 'playing':
                 st.session_state.waiting_for_event = True
                 st.rerun()
 
-    # --- 圖表區 (堆疊面積圖) ---
-    st.markdown("---")
-    if len(st.session_state.history) > 0:
+    # 🔥 修改處：移除了這裡的圖表，只在第 0 年顯示初始配置
+    if len(st.session_state.history) > 0 and current_year == 0:
         with st.container():
-            if current_year == 0:
-                render_asset_snapshot(st.session_state.assets, title="📊 當前資產配置")
-                st.markdown("---")
-            
-            st.subheader("📈 資產成長趨勢圖")
-            df = pd.DataFrame(st.session_state.history)
-            df_melted = df.melt(id_vars=['Year', 'Total'], value_vars=list(ASSET_KEYS), var_name='Asset_Type', value_name='Value')
-            df_melted['Asset_Name'] = df_melted['Asset_Type'].map(ASSET_NAMES)
-            
-            fig = px.area(df_melted, x="Year", y="Value", color="Asset_Name", color_discrete_map=FINANCE_COLORS, template="plotly_white")
-            fig.update_layout(
-                hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
-                margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s"),
-                font=dict(color='#1F2937')
-            )
-            fig.update_traces(hovertemplate="%{y:,.0f}")
-            st.plotly_chart(fig, use_container_width=True)
+            render_asset_snapshot(st.session_state.assets, title="📊 當前資產配置")
 
 # ==========================================
 # 階段 3: Finished
@@ -476,6 +487,74 @@ elif st.session_state.stage == 'finished':
         border_color = '#FCA5A5' if roi < 0 else '#6EE7B7'
         c2.markdown(f"""<div style="text-align: center; border: 1px solid {border_color}; padding: 24px; background: {bg_color}; border-radius: 12px;"><div style="color: #374151; font-size: 14px; font-weight: 600;">總累積報酬率</div><div style="color: {roi_color}; font-size: 36px; font-weight: 800; font-family: 'Inter';">{roi:.1f}%</div></div>""", unsafe_allow_html=True)
         
+        # 🔥 新增：歷史配置策略回顧
+        if st.session_state.config_history:
+            st.markdown("---")
+            st.subheader("🎛️ 歷史配置策略回顧")
+            
+            # 將配置紀錄轉換為 DataFrame
+            df_config = pd.DataFrame(st.session_state.config_history).T # 轉置: 列是年份, 欄是資產
+            df_config = df_config.rename(columns=ASSET_NAMES) # 換成中文名稱
+            
+            # 準備畫圖用的數據 (Melt)
+            df_config_melt = df_config.reset_index().melt(id_vars='index', var_name='Asset', value_name='Percentage')
+            
+            c_chart, c_table = st.columns([2, 1])
+            
+            with c_chart:
+                fig_alloc = px.bar(
+                    df_config_melt, 
+                    x='index', 
+                    y='Percentage', 
+                    color='Asset', 
+                    color_discrete_map=FINANCE_COLORS,
+                    title="配置比例變化圖",
+                    labels={'index': '年份', 'Percentage': '配置比例 (%)'}
+                )
+                fig_alloc.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color='#1F2937'),
+                    margin=dict(t=30, b=0, l=0, r=0)
+                )
+                st.plotly_chart(fig_alloc, use_container_width=True)
+                
+            with c_table:
+                st.write("詳細配置數據 (%)")
+                st.dataframe(df_config.style.format("{:.1f}%"), use_container_width=True) # 修改為顯示小數點
+
+        # 🔥 修改處：結算頁面顯示最終資產快照 (Pie + Table)
+        st.markdown("---")
+        render_asset_snapshot(st.session_state.assets, title="📊 最終資產分佈")
+
+        # 🔥 修改處：結算頁面顯示資產成長趨勢圖 (Area Chart)
+        st.markdown("---")
+        st.subheader("📈 30年資產成長回顧")
+        df = pd.DataFrame(st.session_state.history)
+        df_melted = df.melt(id_vars=['Year', 'Total'], value_vars=list(ASSET_KEYS), var_name='Asset_Type', value_name='Value')
+        df_melted['Asset_Name'] = df_melted['Asset_Type'].map(ASSET_NAMES)
+        
+        fig = px.area(df_melted, x="Year", y="Value", color="Asset_Name", color_discrete_map=FINANCE_COLORS, template="plotly_white")
+        fig.update_layout(
+            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
+            margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s"),
+            font=dict(color='#1F2937')
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("🎴 命運歷程回顧")
+        
+        if len(st.session_state.drawn_cards) > 0:
+            for card_info in st.session_state.drawn_cards:
+                st.markdown(f"""
+                <div style="background: white; border-left: 4px solid #F59E0B; padding: 16px; margin-bottom: 12px; border-radius: 0 8px 8px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                    {card_info}
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("本次模擬無重大事件發生。")
+
         st.markdown("---")
         st.subheader("📝 心得與反饋")
         feedback = st.text_area("請留下您的遊戲心得")
