@@ -478,6 +478,84 @@ elif st.session_state.stage == 'finished':
     final_wealth = sum(st.session_state.assets.values())
     roi = (final_wealth - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
     
+ # --- 🏆 30年最終分級 (修正版) ---
+    # 邏輯：
+    # 1. 虧損 (ROI < 0): 遇到黑天鵝，直接破產。
+    # 2. 跑輸通膨 (0 < ROI < 150): 30年只賺不到1.5倍，其實購買力是下降的 (定存族)。
+    # 3. 普通人 (150 < ROI < 500): 合理的股市回報。
+    # 4. 高手 (500 < ROI < 1000): 有避開大跌，並吃到複利。
+    # 5. 傳奇 (> 1000): 運氣與實力兼具。
+
+    if roi < 0:
+        rank_title = "💸 破產俱樂部"
+        rank_desc = "黑天鵝來襲！波動性吃掉了你的本金..."
+        bg_gradient = "linear-gradient(135deg, #7f1d1d, #ef4444)" # 深紅警戒
+    elif roi < 200:
+        rank_title = "🐢 佛系定存族"
+        rank_desc = "這30年你只贏了帳面，卻輸給了真實通膨。"
+        bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
+    elif roi < 700:
+        rank_title = "💼 理財階級"
+        rank_desc = "表現穩健！這是大多數普通人退休目標。"
+        bg_gradient = "linear-gradient(135deg, #059669, #34d399)" # 穩健綠
+    elif roi < 1200:
+        rank_title = "🚀 自由財富號"
+        rank_desc = "眼光精準！你的資產成長速度驚人。"
+        bg_gradient = "linear-gradient(135deg, #7c3aed, #a78bfa)" # 尊爵紫
+    else:
+        rank_title = "👑 投資界的神"
+        rank_desc = "30年資產翻了10倍以上，巴菲特都要叫你老師！"
+        bg_gradient = "linear-gradient(135deg, #b45309, #fbbf24)" # 傳說金
+    
+
+ # --- 📱 IG 限動截圖區 (置中顯示) ---
+    with st.container():
+        st.markdown("### 📸 IG 限動截圖區")
+        st.caption("👇 請直接對下方卡片進行螢幕截圖 (Screenshot)，即可分享至 IG 限時動態！")
+        
+        ig_c1, ig_c2, ig_c3 = st.columns([1, 2, 1])
+        
+        with ig_c2:
+            # ⚠️ 注意：這裡的 HTML 字串盡量靠左，不要有太多縮排，以免被誤判為程式碼區塊
+            st.markdown(f"""
+<div style="width: 100%; max-width: 380px; margin: 0 auto; background: {bg_gradient}; border-radius: 20px; padding: 30px 20px; color: white; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; border: 4px solid rgba(255,255,255,0.2); font-family: 'Inter', sans-serif;">
+    <div style="font-size: 14px; opacity: 0.8; letter-spacing: 2px; margin-bottom: 10px;">IFRC WEALTH SIMULATION</div>
+    <div style="background: rgba(255,255,255,0.15); border-radius: 50%; width: 80px; height: 80px; margin: 0 auto 15px auto; display: flex; align-items: center; justify-content: center; font-size: 40px; backdrop-filter: blur(5px);">
+        {rank_title.split(' ')[0]}
+    </div>
+    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+        {rank_title.split(' ')[1]}
+    </div>
+    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 25px; font-style: italic;">
+        “{rank_desc}”
+    </div>
+    <div style="background: rgba(255,255,255,0.95); border-radius: 12px; padding: 15px; color: #1F2937; margin-bottom: 15px;">
+        <div style="font-size: 12px; color: #6B7280; font-weight: 600;">最終資產 (30年)</div>
+        <div style="font-size: 32px; font-weight: 800; color: #111827; line-height: 1.2;">
+            ${int(final_wealth):,}
+        </div>
+    </div>
+    <div style="display: flex; justify-content: space-between; gap: 10px;">
+        <div style="flex: 1; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 10px;">
+            <div style="font-size: 11px; opacity: 0.8;">總報酬率</div>
+            <div style="font-size: 18px; font-weight: 700;">{roi:+.1f}%</div>
+        </div>
+        <div style="flex: 1; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 10px;">
+            <div style="font-size: 11px; opacity: 0.8;">玩家</div>
+            <div style="font-size: 18px; font-weight: 700;">{st.session_state.user_name}</div>
+        </div>
+    </div>
+    <div style="margin-top: 25px; font-size: 12px; opacity: 0.6; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 15px;">
+        扭轉命運 30 年 • IFRC Edition
+        <br>#InvestmentChallenge #IFRC
+    </div>
+</div>
+            """, unsafe_allow_html=True)
+    
+    # ... (以下接續原本的詳細數據分析代碼: c1, c2 = st.columns(2) ...)
+    # 記得要把原本 title 的部分 ("🏆 挑戰完成" 那塊) 稍微往下移或保留皆可，
+    # 但這個 IG 卡片最好放在最上面，因為玩家一結束最想看結果。
+
     with st.container():
         st.markdown(f"""<div style="text-align: center;"><h1 style="color: #F59E0B !important;">🏆 挑戰完成</h1><p style="font-size: 1.2rem;">恭喜玩家 <b>{st.session_state.user_name}</b> 完成 30 年投資模擬！</p></div>""", unsafe_allow_html=True)
         c1, c2 = st.columns(2)
@@ -513,7 +591,7 @@ elif st.session_state.stage == 'finished':
                 )
                 fig_alloc.update_layout(
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color='#1F2937'),
+                    font=dict(color="#040405"),
                     margin=dict(t=30, b=0, l=0, r=0)
                 )
                 st.plotly_chart(fig_alloc, use_container_width=True)
@@ -538,7 +616,7 @@ elif st.session_state.stage == 'finished':
             hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
             margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s"),
-            font=dict(color='#1F2937')
+            font=dict(color="#060606")
         )
         st.plotly_chart(fig, use_container_width=True)
 
