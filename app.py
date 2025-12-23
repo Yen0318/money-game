@@ -51,42 +51,50 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         if not file_exists: writer.writeheader()
         writer.writerow(data)
 
-# --- JavaScript 捲動到頂部函數 (錨點鎖定版) ---
+# --- 聰明版捲動函數 (只在換頁時觸發) ---
 def scroll_to_top():
-    # 1. 在頁面最頂端建立一個看不見的錨點 (Target)
+    # 1. 無論如何都在頂部埋下錨點 (Anchor)
     st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
     
-    # 2. 使用 JavaScript 強制瀏覽器將視角鎖定到這個錨點
+    # 2. 判斷是否發生了「頁面切換」或「年份推進」
+    # 只有當 (現在階段 != 上次階段) 或 (現在年份 != 上次年份) 時，才執行滾動
+    should_scroll = False
+    
+    if st.session_state.stage != st.session_state.last_stage:
+        should_scroll = True
+    elif st.session_state.year != st.session_state.last_year:
+        should_scroll = True
+        
+    # 如果偵測到只是在調整數值 (rebalance)，狀態沒變，就不滾動
+    if not should_scroll:
+        return
+
+    # 3. 更新狀態紀錄 (這樣下次就不會再滾動，直到下一次換頁)
+    st.session_state.last_stage = st.session_state.stage
+    st.session_state.last_year = st.session_state.year
+
+    # 4. 執行 JavaScript 強制捲動
     js = f"""
     <script>
-        // 加入時間戳記，確保每次 Rerun 都會執行
         var timestamp = {time.time()};
-        
         function forceScroll() {{
-            // 找到我們剛剛建立的錨點
             var target = window.parent.document.getElementById('top-anchor');
-            
             if (target) {{
-                // 使用 scrollIntoView 強制跳轉
-                // behavior: 'auto' (瞬間) vs 'smooth' (平滑)
-                // block: 'start' (對齊頂部)
                 target.scrollIntoView({{behavior: 'auto', block: 'start'}});
             }} else {{
-                // 備用方案：如果找不到錨點，針對所有可能的容器歸零
                 window.parent.scrollTo(0, 0);
                 var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
                 if (viewContainer) viewContainer.scrollTop = 0;
             }}
         }}
-
-        // 針對手機版頑強的抵抗，執行連環呼叫
+        // 執行連環呼叫
         forceScroll();
-        setTimeout(forceScroll, 100);  // 0.1秒後
-        setTimeout(forceScroll, 500);  // 0.5秒後 (針對載入慢的手機)
+        setTimeout(forceScroll, 100);
+        setTimeout(forceScroll, 300);
     </script>
     """
     components.html(js, height=0)
-
+    
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
 
