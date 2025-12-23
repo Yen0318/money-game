@@ -50,47 +50,71 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         writer = csv.DictWriter(f, fieldnames=data.keys())
         if not file_exists: writer.writeheader()
         writer.writerow(data)
+# ==========================================
+# ⚡️ 核心初始化區 (State Initialization)
+# ==========================================
+# 1. 遊戲核心變數
+ASSET_KEYS = ['Dividend', 'USBond', 'TWStock', 'Cash', 'Crypto']
+if 'stage' not in st.session_state: st.session_state.stage = 'login'
+if 'year' not in st.session_state: st.session_state.year = 0
+if 'assets' not in st.session_state: st.session_state.assets = {k: 0 for k in ASSET_KEYS}
+if 'history' not in st.session_state: st.session_state.history = []
+if 'user_name' not in st.session_state: st.session_state.user_name = ""
+if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
+if 'config_history' not in st.session_state: st.session_state.config_history = {}
+if 'data_saved' not in st.session_state: st.session_state.data_saved = False
 
-# --- JavaScript 捲動到頂部函數 (錨點鎖定版) ---
+# 2. 捲動偵測變數 (必須在上面變數之後初始化)
+if 'last_stage' not in st.session_state: st.session_state.last_stage = st.session_state.stage
+if 'last_year' not in st.session_state: st.session_state.last_year = st.session_state.year
+
+# ==========================================
+# 📜 捲動控制函數 (Smart Scroll)
+# ==========================================
 def scroll_to_top():
-    # 1. 在頁面最頂端建立一個看不見的錨點 (Target)
+    # 1. 無論如何都在頂部埋下錨點 (Anchor)
     st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
     
-    # 2. 使用 JavaScript 強制瀏覽器將視角鎖定到這個錨點
+    # 2. 判斷是否需要捲動
+    should_scroll = False
+    if st.session_state.stage != st.session_state.last_stage:
+        should_scroll = True
+    elif st.session_state.year != st.session_state.last_year:
+        should_scroll = True
+        
+    # 如果偵測到只是在調整數值 (狀態沒變)，就更新狀態但不執行 JS，直接結束
+    if not should_scroll:
+        st.session_state.last_stage = st.session_state.stage
+        st.session_state.last_year = st.session_state.year
+        return
+
+    # 3. 確實換頁了，更新狀態並執行捲動
+    st.session_state.last_stage = st.session_state.stage
+    st.session_state.last_year = st.session_state.year
+
+    # 4. 執行 JavaScript 強制捲動
     js = f"""
     <script>
-        // 加入時間戳記，確保每次 Rerun 都會執行
         var timestamp = {time.time()};
-        
         function forceScroll() {{
-            // 找到我們剛剛建立的錨點
             var target = window.parent.document.getElementById('top-anchor');
-            
             if (target) {{
-                // 使用 scrollIntoView 強制跳轉
-                // behavior: 'auto' (瞬間) vs 'smooth' (平滑)
-                // block: 'start' (對齊頂部)
                 target.scrollIntoView({{behavior: 'auto', block: 'start'}});
             }} else {{
-                // 備用方案：如果找不到錨點，針對所有可能的容器歸零
                 window.parent.scrollTo(0, 0);
                 var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
                 if (viewContainer) viewContainer.scrollTop = 0;
             }}
         }}
-
-        // 針對手機版頑強的抵抗，執行連環呼叫
+        // 執行連環呼叫，確保手機版生效
         forceScroll();
-        setTimeout(forceScroll, 100);  // 0.1秒後
-        setTimeout(forceScroll, 500);  // 0.5秒後 (針對載入慢的手機)
+        setTimeout(forceScroll, 100);
+        setTimeout(forceScroll, 300);
     </script>
     """
     components.html(js, height=0)
 
-# --- 1. 頁面設定 ---
-st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
-
-# 每次重新執行都嘗試捲動到頂部
+# 🔥 立即執行捲動檢查
 scroll_to_top()
 
 # --- 2. ✨ 現代 FinTech 風格 CSS (強力修正字體顏色版) ✨ ---
