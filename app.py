@@ -52,35 +52,49 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         writer.writerow(data)
 
 # --- 修正後的 JavaScript 捲動到頂部函數 ---
+# --- JavaScript 捲動到頂部函數 (手機版強力修正) ---
 def scroll_to_top():
-    # 技巧：將時間戳 (time.time()) 直接寫入 JavaScript 的註解或變數中
-    # 這樣每次 rerun 時，js 的字串內容都會不同，Streamlit 就會強制重新執行它
+    # 技巧：加入時間戳記確保每次都執行
+    # 使用 setTimeout 進行延遲滾動，解決手機版渲染時間差的問題
     js = f"""
     <script>
-        // Force Reload Timestamp: {time.time()}
+        var timestamp = {time.time()};
         
-        var body = window.parent.document.querySelector(".main");
-        var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
-        
-        if (body) {{
-            body.scrollTop = 0;
+        function forceScrollTop() {{
+            // 1. 抓取 Streamlit 主要滾動容器
+            var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
+            if (viewContainer) {{
+                // 使用 scrollTo 方法，behavior: 'auto' 確保是瞬間跳轉而不是滑動
+                viewContainer.scrollTo({{top: 0, left: 0, behavior: 'auto'}});
+            }}
+            
+            // 2. 備用方案：針對整個視窗
+            window.parent.scrollTo(0, 0);
         }}
-        
-        if (viewContainer) {{
-            viewContainer.scrollTop = 0;
-        }}
-        
-        window.parent.scrollTo(0, 0);
+
+        // 第一擊：立刻執行
+        forceScrollTop();
+
+        // 第二擊：50毫秒後執行 (針對快速渲染的手機)
+        setTimeout(forceScrollTop, 50);
+
+        // 第三擊：300毫秒後執行 (針對載入較慢的手機或網路環境)
+        setTimeout(forceScrollTop, 300);
     </script>
     """
-    # 移除 key 參數，只傳入 js 與 height
     components.html(js, height=0)
-
 # --- 1. 頁面設定 ---
 st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
 
-# 每次重新執行都嘗試捲動到頂部
+# 1. 程式開頭 (set_page_config 之後)
 scroll_to_top()
+
+# 2. 或者在按鈕邏輯中 (更保險的做法)
+if st.button("▶ 確認並開始", type="primary"):
+    # ... 設定變數 ...
+    st.session_state.stage = 'setup'
+    st.session_state.data_saved = False
+    st.rerun() # 這裡 rerun 後，開頭的 scroll_to_top 就會被再次觸發
 
 # --- 2. ✨ 現代 FinTech 風格 CSS (強力修正字體顏色版) ✨ ---
 st.markdown("""
