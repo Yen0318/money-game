@@ -319,7 +319,7 @@ if st.session_state.stage == 'login':
     with st.container():
         st.markdown("<div style='text-align: center; margin-bottom: 10px;'>👋 歡迎來到資產模擬挑戰</div>", unsafe_allow_html=True)
         
-        img_c1, img_c2, img_c3 = st.columns([1, 2, 1])
+        img_c1, img_c2, img_c3 = st.columns([1, 1, 1])
         with img_c2:
             image_path = "images/homepage.png"
             if os.path.exists(image_path):
@@ -333,7 +333,7 @@ if st.session_state.stage == 'login':
         with input_c2:
             name_input = st.text_input("請輸入玩家暱稱", placeholder="例如: 小明", key="login_name")
             st.write("")
-            if st.button("▶ 確認並開始", type="primary"):
+            if st.button("▶ 確定配置", type="primary"):
                 if name_input.strip():
                     st.session_state.user_name = name_input
                     st.session_state.stage = 'setup'
@@ -419,7 +419,7 @@ elif st.session_state.stage == 'setup':
             """, unsafe_allow_html=True)
         else:
             st.write("")
-            if st.button("確認並開始 ✅", type="primary"):
+            if st.button("開始挑戰 ✅", type="primary"):
                 props = [p1, p2, p3, p4, p5]
                 st.session_state.config_history['Year 0'] = {k: v for k, v in zip(ASSET_KEYS, props)}
                 for i, key in enumerate(ASSET_KEYS):
@@ -448,7 +448,7 @@ elif st.session_state.stage == 'playing':
 
     current_year = st.session_state.year
     
-    # --- 1. 抽卡事件 ---
+# --- 1. 抽卡事件 ---
     if st.session_state.get('waiting_for_event', False):
         with st.container():
             st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
@@ -456,17 +456,42 @@ elif st.session_state.stage == 'playing':
             render_asset_snapshot(st.session_state.assets, title="📊 衝擊前資產快照")
             st.markdown("---")
             
+            # ==========================================
+            # 🃏 神秘封面圖邏輯 (新增部分)
+            # ==========================================
+            # 1. 先從 session_state 抓取目前輸入框的值 (如果有)
+            current_input = st.session_state.get("event_card_input", "")
+            temp_code = str(current_input).strip()
+            
+            # 2. 如果輸入的代碼還沒通過驗證 (是空的 或 錯誤代碼)，就顯示封面圖
+            if temp_code not in EVENT_CARDS:
+                cover_img = "images/homepage.png" # 請準備這張「卡背」圖片
+                cover_c1, cover_c2, cover_c3 = st.columns([1, 1, 1])
+                with cover_c2:
+                    if os.path.exists(cover_img):
+                        st.image(cover_img, use_container_width=True, caption="請輸入卡片代碼翻開命運...")
+                    else:
+                        # 如果找不到圖，顯示一個大大的問號
+                        st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
+            # ==========================================
+            
             col_input, col_status = st.columns([2, 1])
+            
+            # 🔥 關鍵：加入 key="event_card_input" 
+            # 這樣上面的邏輯才能在我們打字時，即時抓到值並把封面圖隱藏
             input_code = col_input.text_input(
                 "請在此輸入卡片代碼 (3碼)",
                 placeholder="例如: 101", 
-                help="請查看您抽到的實體卡片，輸入上面的3位數編號 (例如 101, 102...)"
+                help="請查看您抽到的實體卡片，輸入上面的3位數編號 (例如 101, 102...)",
+                key="event_card_input"
             )
             clean_code = str(input_code).strip()
             
             if clean_code in EVENT_CARDS:
                 card_data = EVENT_CARDS[clean_code]
                 image_path = f"images/{clean_code}.png"
+                
+                # 這裡顯示真正的卡片內容 (原本的程式碼)
                 col_img, col_desc = st.columns([1, 2])
                 with col_img:
                     if os.path.exists(image_path): st.image(image_path, use_container_width=True)
@@ -492,7 +517,8 @@ elif st.session_state.stage == 'playing':
                     cols[i].markdown(f"""<div style="text-align: center; background: #fff; padding: 12px 5px; border-radius: 8px; border: 1px solid #E5E7EB; height: 100%;"><div style="color: #6B7280; font-size: 13px; margin-bottom: 4px;">{name}</div><div style="color: {color}; font-size: 20px; font-weight: bold; line-height: 1;">{arrow} {abs(pct_change)}%</div><div style="color: {color}; font-size: 14px; font-weight: 600; margin-top: 6px; background-color: {'#FEF2F2' if pct_change < 0 else '#ECFDF5'}; padding: 2px 4px; border-radius: 4px;">{sign}${int(impact_val):,}</div></div>""", unsafe_allow_html=True)
 
                 st.write("")
-                if st.button("接受市場波動 📉", type="primary"):
+                # 修改按鈕文字增加帶入感
+                if st.button("迎接命運衝擊 📉", type="primary"):
                     st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
                     st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
                     st.session_state.assets['TWStock']  *= (1 + card_data['stock']/100)
@@ -557,7 +583,28 @@ elif st.session_state.stage == 'playing':
     elif current_year < 30:
         with st.container():
             st.markdown(f"### ⏩ 推進時間軸: 第 {current_year+1} - {current_year+10} 年")
-            
+            # ==========================================
+            # 🖼️ 新增圖片區塊 (在此處插入)
+            # ==========================================
+            # 設定圖片路徑 (您可以依據年份換不同的圖，或是用同一張)
+            # 例如: images/time_0.png, images/time_10.png...
+            if current_year == 0:
+                jump_img = "images/wait1.png" # 建議放一張火箭或起跑的圖
+            elif current_year == 10:
+                jump_img = "images/wait2.png"   # 建議放一張正在成長的圖
+            else:
+                jump_img = "images/wait3.png"  # 建議放一張衝刺的圖    
+            # 如果沒有分那麼細，也可以統一用這一行：
+            # jump_img = "images/time_warp.png" 
+
+            # 顯示圖片 (使用 columns 讓圖片置中，比例 1:2:1)
+            img_c1, img_c2, img_c3 = st.columns([1, 0.5, 1])
+            with img_c2:
+                if os.path.exists(jump_img):
+                    st.image(jump_img, use_container_width=True)
+                else:
+                    # 如果找不到圖片，顯示一個可愛的 Emoji 動畫替代
+                    st.markdown("<div style='text-align: center; font-size: 60px; margin: 20px 0;'>🚀 ⏳ 💰</div>", unsafe_allow_html=True)            
             run_simulation = False
             
             if current_year == 0:
@@ -568,12 +615,12 @@ elif st.session_state.stage == 'playing':
                         st.session_state.history = [] 
                         st.rerun()
                 with c_run:
-                    if st.button(f"執行 10 年資產模擬 ▶", type="primary"):
+                    if st.button(f"查看10年後變化 ▶", type="primary"):
                         run_simulation = True
             else:
-                if st.button(f"執行 10 年資產模擬 ▶", type="primary"):
+                if st.button(f"查看10年後變化 ▶", type="primary"):
                     run_simulation = True
-            
+                
             if run_simulation:
                 for y in range(1, 11):
                     st.session_state.assets['Dividend'] *= (1 + BASE_RATES['Dividend']) 
