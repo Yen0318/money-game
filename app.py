@@ -360,7 +360,7 @@ if st.session_state.stage == 'login':
         with input_c2:
             name_input = st.text_input("請輸入玩家暱稱", placeholder="例如: 小明", key="login_name")
             st.write("")
-            if st.button("▶ 確定配置", type="primary"):
+            if st.button("▶ 開始挑戰", type="primary"):
                 if name_input.strip():
                     st.session_state.user_name = name_input
                     st.session_state.stage = 'setup'
@@ -446,7 +446,7 @@ elif st.session_state.stage == 'setup':
             """, unsafe_allow_html=True)
         else:
             st.write("")
-            if st.button("開始挑戰 ✅", type="primary"):
+            if st.button("確定配置 ✅", type="primary"):
                 props = [p1, p2, p3, p4, p5]
                 st.session_state.config_history['Year 0'] = {k: v for k, v in zip(ASSET_KEYS, props)}
                 for i, key in enumerate(ASSET_KEYS):
