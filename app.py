@@ -692,6 +692,10 @@ elif st.session_state.stage == 'finished':
         rank_title = "🐢 佛系定存族"
         rank_desc = "這30年你只贏了帳面，卻輸給了真實通膨。"
         bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
+    elif roi < 300:
+        rank_title = "🐢 佛系理財族"
+        rank_desc = "這30年只贏了通貨膨脹，接下來能追求財富倍增。"
+        bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
     elif roi < 400:
         rank_title = "💼 理財小白"
         rank_desc = "表現穩健！開始有資產配置觀念。"
@@ -725,11 +729,11 @@ elif st.session_state.stage == 'finished':
             # ⚠️ 注意：這裡的 HTML 字串盡量靠左，不要有太多縮排，以免被誤判為程式碼區塊
             st.markdown(f"""
 <div style="width: 100%; max-width: 380px; margin: 0 auto; background: {bg_gradient}; border-radius: 20px; padding: 30px 20px; color: white; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; border: 4px solid rgba(255,255,255,0.2); font-family: 'Inter', sans-serif;">
-    <div style="font-size: 14px; opacity: 0.8; letter-spacing: 2px; margin-bottom: 10px;">IFRC WEALTH SIMULATION</div>
+    <div style="font-size: 14px; opacity: 0.4; letter-spacing: 2px; margin-bottom: 10px;">IFRC WEALTH SIMULATION</div>
     <div style="background: rgba(255,255,255,0.15); border-radius: 50%; width: 80px; height: 80px; margin: 0 auto 15px auto; display: flex; align-items: center; justify-content: center; font-size: 40px; backdrop-filter: blur(5px);">
         {rank_title.split(' ')[0]}
     </div>
-    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px; text-shadow: none;">
         {rank_title.split(' ')[1]}
     </div>
     <div style="font-size: 14px; opacity: 0.9; margin-bottom: 25px; font-style: italic;">
