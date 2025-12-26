@@ -665,34 +665,15 @@ elif st.session_state.stage == 'playing':
                     st.session_state.waiting_for_rebalance = False
                     st.rerun()
 
-    # --- 3. 推進時間軸 ---
+# --- 3. 推進時間軸 ---
     elif current_year < 30:
         with st.container():
             st.markdown(f"### ⏩ 推進時間軸: 第 {current_year+1} - {current_year+10} 年")
-            # ==========================================
-            # 🖼️ 新增圖片區塊 (在此處插入)
-            # ==========================================
-            # 設定圖片路徑 (您可以依據年份換不同的圖，或是用同一張)
-            # 例如: images/time_0.png, images/time_10.png...
-            if current_year == 0:
-                jump_img = "images/wait1.png" # 建議放一張火箭或起跑的圖
-            elif current_year == 10:
-                jump_img = "images/wait2.png"   # 建議放一張正在成長的圖
-            else:
-                jump_img = "images/wait3.png"  # 建議放一張衝刺的圖    
-            # 如果沒有分那麼細，也可以統一用這一行：
-            # jump_img = "images/time_warp.png" 
-
-            # 顯示圖片 (使用 columns 讓圖片置中，比例 1:2:1)
-            img_c1, img_c2, img_c3 = st.columns([1, 0.5, 1])
-            with img_c2:
-                if os.path.exists(jump_img):
-                    st.image(jump_img, use_container_width=True)
-                else:
-                    # 如果找不到圖片，顯示一個可愛的 Emoji 動畫替代
-                    st.markdown("<div style='text-align: center; font-size: 60px; margin: 20px 0;'>🚀 ⏳ 💰</div>", unsafe_allow_html=True)            
+            
+            # 定義過場變數
             run_simulation = False
             
+            # 按鈕區域佈局
             if current_year == 0:
                 c_back, c_run = st.columns([1, 4])
                 with c_back:
@@ -701,24 +682,73 @@ elif st.session_state.stage == 'playing':
                         st.session_state.history = [] 
                         st.rerun()
                 with c_run:
-                    if st.button(f"查看10年後變化 ▶", type="primary"):
+                    if st.button(f"🚀 啟動時光機 (前往第 {current_year+10} 年)", type="primary"):
                         run_simulation = True
             else:
-                if st.button(f"查看10年後變化 ▶", type="primary"):
+                if st.button(f"🚀 前往下一個十年 (Year {current_year+10})", type="primary"):
                     run_simulation = True
-                
+            
+            # --- ⏳ 轉場動畫與計算邏輯 ---
             if run_simulation:
+                # 1. 建立一個佔位區塊，用來顯示過場動畫
+                transition_placeholder = st.empty()
+                
+                # 2. 決定過場圖片 (您可以準備 images/time_jump.png 或依年份區分)
+                if current_year == 0:
+                    jump_img = "images/wait1.png"   # 建議：火箭發射或起跑圖
+                    jump_text = "🚀 3, 2, 1... 投資旅程正式展開！"
+                elif current_year == 10:
+                    jump_img = "images/wait2.png"   # 建議：正在快速成長的城市或圖表
+                    jump_text = "📈 十年過去了，市場風雲變色..."
+                else:
+                    jump_img = "images/wait3.png"   # 建議：衝向終點線或金庫
+                    jump_text = "🏁 最後衝刺！迎向財富自由的終點！"
+                
+                # 3. 顯示過場畫面 (這會暫時覆蓋掉下方的內容)
+                with transition_placeholder.container():
+                    st.markdown("---")
+                    t_c1, t_c2, t_c3 = st.columns([1, 1, 1])
+                    with t_c2:
+                        st.markdown(f"<h2 style='text-align: center; color: #2563EB;'>{jump_text}</h2>", unsafe_allow_html=True)
+                        if os.path.exists(jump_img):
+                            st.image(jump_img, use_container_width=True)
+                        else:
+                            # 如果沒圖，顯示可愛的 Emoji 動畫
+                            st.markdown("""
+                                <div style='text-align: center; font-size: 80px; margin: 40px 0; animation: bounce 1s infinite;'>
+                                    ⏳ ➡️ 💰
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # 顯示讀取條
+                        progress_text = "正在計算複利效應..."
+                        my_bar = st.progress(0, text=progress_text)
+                        
+                        for percent_complete in range(100):
+                            time.sleep(0.015) # 稍微控制一下進度條速度
+                            my_bar.progress(percent_complete + 1, text=progress_text)
+                    
+                    # 額外的停留時間，讓玩家看清楚圖片
+                    time.sleep(1.0) 
+
+                # 4. 執行數學計算 (後台)
                 for y in range(1, 11):
                     st.session_state.assets['Dividend'] *= (1 + st.session_state.dynamic_rates['Dividend']) 
                     st.session_state.assets['USBond']   *= (1 + st.session_state.dynamic_rates['USBond']) 
                     st.session_state.assets['TWStock']  *= (1 + st.session_state.dynamic_rates['TWStock']) 
                     st.session_state.assets['Cash']     *= (1 + st.session_state.dynamic_rates['Cash'])
                     st.session_state.assets['Crypto']   *= (1 + st.session_state.dynamic_rates['Crypto']) 
+                    
                     record = {'Year': current_year + y, 'Total': sum(st.session_state.assets.values())}
                     record.update(st.session_state.assets)
                     st.session_state.history.append(record)
+                
+                # 5. 更新狀態並重新整理
                 st.session_state.year += 10
                 st.session_state.waiting_for_event = True
+                
+                # 清除過場畫面 (其實 rerun 會自動清掉，但這樣寫比較保險)
+                transition_placeholder.empty()
                 st.rerun()
 
     # 🔥 修改處：移除了這裡的圖表，只在第 0 年顯示初始配置
