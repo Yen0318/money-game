@@ -707,7 +707,7 @@ elif st.session_state.stage == 'playing':
                 # 3. 顯示過場畫面 (這會暫時覆蓋掉下方的內容)
                 with transition_placeholder.container():
                     st.markdown("---")
-                    t_c1, t_c2, t_c3 = st.columns([1, 1, 1])
+                    t_c1, t_c2, t_c3 = st.columns([1, 0.5, 1])
                     with t_c2:
                         st.markdown(f"<h2 style='text-align: center; color: #2563EB;'>{jump_text}</h2>", unsafe_allow_html=True)
                         if os.path.exists(jump_img):
@@ -725,7 +725,7 @@ elif st.session_state.stage == 'playing':
                         my_bar = st.progress(0, text=progress_text)
                         
                         for percent_complete in range(100):
-                            time.sleep(0.015) # 稍微控制一下進度條速度
+                            time.sleep(0.03) # 稍微控制一下進度條速度
                             my_bar.progress(percent_complete + 1, text=progress_text)
                     
                     # 額外的停留時間，讓玩家看清楚圖片
