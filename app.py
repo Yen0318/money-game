@@ -70,6 +70,11 @@ if 'data_saved' not in st.session_state: st.session_state.data_saved = False
 # 🔥 新增：確保 waiting_for_rebalance 變數存在
 if 'waiting_for_rebalance' not in st.session_state: st.session_state.waiting_for_rebalance = False
 
+# 🔥 新增：動態利率初始化 (讓管理員可以調整)
+if 'dynamic_rates' not in st.session_state: 
+    st.session_state.dynamic_rates = BASE_RATES.copy()
+
+
 # 2. 捲動偵測變數
 if 'last_stage' not in st.session_state: st.session_state.last_stage = st.session_state.stage
 if 'last_year' not in st.session_state: st.session_state.last_year = st.session_state.year
@@ -283,9 +288,11 @@ def render_asset_snapshot(current_assets, title="📊 當前資產快照"):
 # --- 側邊欄 ---
 ADMIN_PASSWORD = "tsts"
 if 'admin_unlocked' not in st.session_state: st.session_state.admin_unlocked = False
-
+# ==========================================
+# 👑 管理員超級控制台 (Admin Super Panel)
+# ==========================================
 with st.sidebar:
-    st.markdown("### ⚙️ 管理員後台")
+    st.markdown("### 🏦 IFRC 管理員後台")
     if not st.session_state.admin_unlocked:
         st.info("🔒 需要管理員權限")
         pwd_input = st.text_input("輸入密碼", type="password", key="admin_pwd_input")
@@ -293,17 +300,68 @@ with st.sidebar:
             st.session_state.admin_unlocked = True
             st.rerun()
     else:
-        st.success("✅ 系統已解鎖")
-        if os.path.exists(CSV_FILE):
-            df_record = pd.read_csv(CSV_FILE)
-            st.write(f"📊 總筆數: {len(df_record)}")
-            with open(CSV_FILE, "rb") as file:
-                st.download_button(label="📥 下載數據 CSV", data=file, file_name="game_results.csv", mime="text/csv")
+        st.success("✅ 系統管理權限已解鎖")
+        
+        # --- 1. 遊戲進程控制 (跳轉功能) ---
+        with st.expander("🚀 頁面快速跳轉", expanded=False):
+            target_stage = st.selectbox(
+                "切換至階段",
+                options=['login', 'setup', 'playing', 'finished'],
+                index=['login', 'setup', 'playing', 'finished'].index(st.session_state.stage)
+            )
+            target_year = st.slider("調整當前年份", 0, 30, st.session_state.year)
+            # 在管理員後台的「執行跳轉」按鈕中加入自動補數據邏輯
+            if st.button("執行強制跳轉"):
+                st.session_state.stage = target_stage
+                st.session_state.year = target_year
+                
+                # 🔥 如果跳轉到結束頁且目前沒數據，塞入一筆假資料防止報錯
+                if target_stage == 'finished' and not st.session_state.history:
+                    st.session_state.history = [{'Year': 0, 'Total': 1000000}]
+                    # 給予一些預設資產數值
+                    for k in ASSET_KEYS:
+                        st.session_state.assets[k] = 200000 
+                        
+                st.session_state.waiting_for_event = False
+                st.session_state.waiting_for_rebalance = False
+                st.rerun()
+
+        # --- 2. 動態市場調控 (上帝模式) ---
+        with st.expander("📈 市場動態環境調控", expanded=False):
+            st.caption("調整後的基礎利率將影響下一個『10年跳轉』。")
+            updated_rates = {}
+            for k in ASSET_KEYS:
+                updated_rates[k] = st.slider(f"{ASSET_NAMES[k]} 年化", -0.20, 0.20, st.session_state.dynamic_rates[k], step=0.01, format="%.2f")
+            if st.button("儲存新市場設定"):
+                st.session_state.dynamic_rates = updated_rates
+                st.toast("市場參數已更新！", icon="🌍")
+
+        # --- 3. 即時戰況與數據導出 ---
+        with st.expander("📊 現場數據監控", expanded=True):
+            if os.path.exists(CSV_FILE):
+                df_rec = pd.read_csv(CSV_FILE)
+                st.write(f"目前累積完賽人數: `{len(df_rec)}`")
+                if not df_rec.empty:
+                    lb = df_rec[['姓名', '最終資產', '報酬率(%)']].sort_values(by='最終資產', ascending=False)
+                    st.dataframe(lb.head(5), hide_index=True)
+                
+                with open(CSV_FILE, "rb") as f:
+                    st.download_button("📥 下載完整 CSV", data=f, file_name="final_report.csv", mime="text/csv")
+            else:
+                st.info("尚無玩家數據")
+
+        # --- 4. 系統維護 ---
+        with st.expander("🧹 危險區域", expanded=False):
+            if st.button("🔥 清空所有歷史記錄"):
+                if os.path.exists(CSV_FILE):
+                    os.remove(CSV_FILE)
+                    st.success("數據已清空")
+                    st.rerun()
+
         st.markdown("---")
-        if st.button("🔒 鎖定系統"):
+        if st.button("🔒 重新鎖定系統"):
             st.session_state.admin_unlocked = False
             st.rerun()
-
 # --- 標題 ---
 st.markdown("""
     <div style="text-align: center; padding: 20px 0 40px 0;">
@@ -651,11 +709,11 @@ elif st.session_state.stage == 'playing':
                 
             if run_simulation:
                 for y in range(1, 11):
-                    st.session_state.assets['Dividend'] *= (1 + BASE_RATES['Dividend']) 
-                    st.session_state.assets['USBond']   *= (1 + BASE_RATES['USBond']) 
-                    st.session_state.assets['TWStock']  *= (1 + BASE_RATES['TWStock']) 
-                    st.session_state.assets['Cash']     *= (1 + BASE_RATES['Cash'])
-                    st.session_state.assets['Crypto']   *= (1 + BASE_RATES['Crypto']) 
+                    st.session_state.assets['Dividend'] *= (1 + st.session_state.dynamic_rates['Dividend']) 
+                    st.session_state.assets['USBond']   *= (1 + st.session_state.dynamic_rates['USBond']) 
+                    st.session_state.assets['TWStock']  *= (1 + st.session_state.dynamic_rates['TWStock']) 
+                    st.session_state.assets['Cash']     *= (1 + st.session_state.dynamic_rates['Cash'])
+                    st.session_state.assets['Crypto']   *= (1 + st.session_state.dynamic_rates['Crypto']) 
                     record = {'Year': current_year + y, 'Total': sum(st.session_state.assets.values())}
                     record.update(st.session_state.assets)
                     st.session_state.history.append(record)
