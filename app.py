@@ -1,22 +1,26 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
 import os
 import csv
-import time
+import copy
 from datetime import datetime
+from pathlib import Path
+import pandas as pd
 import plotly.express as px
-import streamlit.components.v1 as components
-
-# --- 1. 頁面設定 (必須放在所有 Streamlit 指令的第一行) ---
-st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
+from shiny import App, Inputs, Outputs, Session, reactive, render, ui, req
+from shinywidgets import output_widget, render_widget
 
 # ==========================================
-# ⚙️ 後台設定區 (Host Control)
+# ⚙️ 全域設定 (常數)
 # ==========================================
 BASE_RATES = {
     'Dividend': 0.06, 'USBond': 0.03, 'TWStock': 0.07, 'Cash': 0.0, 'Crypto': 0.1
 }
+
+ASSET_KEYS = ['Dividend', 'USBond', 'TWStock', 'Cash', 'Crypto']
+ASSET_NAMES = {'Dividend': '分紅收益', 'USBond': '美債', 'TWStock': '台股', 'Cash': '現金', 'Crypto': '加密幣'}
+FINANCE_COLORS = {'分紅收益': '#F59E0B', '美債': '#3B82F6', '台股': '#EF4444', '現金': '#9CA3AF', '加密幣': '#8B5CF6'}
+
+# 注意：這裡的 key 是小寫，對應卡片資料結構
+KEY_MAPPING = {'Dividend': 'dividend', 'USBond': 'bond', 'TWStock': 'stock', 'Cash': 'cash', 'Crypto': 'crypto'}
 
 EVENT_CARDS = {
     "101": {"name": "US FED降息3%",      "dividend": 7,  "bond": 2,  "stock": 20,   "cash": 0,  "crypto": 100,   "desc": "💸 資金大放水！市場流動性暴增，風險資產狂噴。"},
@@ -34,933 +38,666 @@ EVENT_CARDS = {
 }
 
 CSV_FILE = 'game_data_records.csv'
-
-# --- 存檔函數 ---
-def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
-    data = {
-        '時間': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        '姓名': name,
-        '最終資產': int(wealth),
-        '報酬率(%)': round(roi, 1),
-        '抽卡歷程': " | ".join(cards),
-        '配置_Year0': str(config_history.get('Year 0', '')),
-        '配置_Year10': str(config_history.get('Year 10', '')),
-        '配置_Year20': str(config_history.get('Year 20', '')),
-        '玩家反饋': feedback
-    }
-    file_exists = os.path.isfile(CSV_FILE)
-    with open(CSV_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-        writer = csv.DictWriter(f, fieldnames=data.keys())
-        if not file_exists: writer.writeheader()
-        writer.writerow(data)
-
-# ==========================================
-# ⚡️ 核心初始化區 (State Initialization)
-# ==========================================
-# 1. 遊戲核心變數
-ASSET_KEYS = ['Dividend', 'USBond', 'TWStock', 'Cash', 'Crypto']
-if 'stage' not in st.session_state: st.session_state.stage = 'login'
-if 'year' not in st.session_state: st.session_state.year = 0
-if 'assets' not in st.session_state: st.session_state.assets = {k: 0 for k in ASSET_KEYS}
-if 'history' not in st.session_state: st.session_state.history = []
-if 'user_name' not in st.session_state: st.session_state.user_name = ""
-if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
-if 'config_history' not in st.session_state: st.session_state.config_history = {}
-if 'data_saved' not in st.session_state: st.session_state.data_saved = False
-# 🔥 新增：確保 waiting_for_rebalance 變數存在
-if 'waiting_for_rebalance' not in st.session_state: st.session_state.waiting_for_rebalance = False
-
-# 🔥 新增：動態利率初始化 (讓管理員可以調整)
-if 'dynamic_rates' not in st.session_state: 
-    st.session_state.dynamic_rates = BASE_RATES.copy()
-
-
-# 2. 捲動偵測變數
-if 'last_stage' not in st.session_state: st.session_state.last_stage = st.session_state.stage
-if 'last_year' not in st.session_state: st.session_state.last_year = st.session_state.year
-# 🔥 新增：偵測再平衡狀態的改變
-if 'last_rebalance' not in st.session_state: st.session_state.last_rebalance = st.session_state.waiting_for_rebalance
-
-# ==========================================
-# 📜 捲動控制函數 (Smart & Strong Scroll)
-# ==========================================
-def scroll_to_top():
-    # 1. 埋下錨點
-    st.markdown('<div id="top-anchor"></div>', unsafe_allow_html=True)
-    
-    # 2. 檢查是否發生「換頁」、「年份變更」或「進入再平衡階段」
-    should_scroll = False
-    
-    if st.session_state.stage != st.session_state.last_stage:
-        should_scroll = True
-    elif st.session_state.year != st.session_state.last_year:
-        should_scroll = True
-    elif st.session_state.waiting_for_rebalance != st.session_state.last_rebalance:
-        # 🔥 新增：當從抽卡畫面(False)變成調整畫面(True)時，觸發捲動
-        should_scroll = True
-        
-    # 如果只是單純調整滑桿(狀態未變)，同步紀錄後退出，不執行 JS
-    if not should_scroll:
-        st.session_state.last_stage = st.session_state.stage
-        st.session_state.last_year = st.session_state.year
-        st.session_state.last_rebalance = st.session_state.waiting_for_rebalance
-        return
-
-    # 3. 確實進入新階段了，更新狀態
-    st.session_state.last_stage = st.session_state.stage
-    st.session_state.last_year = st.session_state.year
-    st.session_state.last_rebalance = st.session_state.waiting_for_rebalance
-
-    # 4. 執行霸道捲動 JS (連續執行 1 秒)
-    js = f"""
-    <script>
-        var timestamp = {time.time()};
-        
-        function forceScroll() {{
-            var target = window.parent.document.getElementById('top-anchor');
-            var viewContainer = window.parent.document.querySelector("[data-testid='stAppViewContainer']");
-            
-            if (target) {{
-                target.scrollIntoView({{behavior: 'auto', block: 'start'}});
-            }}
-            if (viewContainer) {{
-                viewContainer.scrollTop = 0;
-            }}
-        }}
-
-        // 立即執行
-        forceScroll();
-        
-        // 連續轟炸 1 秒 (對抗手機渲染延遲)
-        var count = 0;
-        var intervalId = setInterval(function(){{
-            forceScroll();
-            count++;
-            if(count > 20) clearInterval(intervalId);
-        }}, 50);
-    </script>
-    """
-    components.html(js, height=0)
-
-# 🔥 立即執行捲動檢查
-scroll_to_top()
-
-# ---------------- 下方接續 CSS 設定與主程式 ----------------
-
-# --- 2. ✨ 現代 FinTech 風格 CSS (強力修正字體顏色版) ✨ ---
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+TC:wght@400;700&display=swap');
-
-    :root {
-        --primary: #2563EB;
-        --primary-dark: #1E40AF;
-        --secondary: #F59E0B;
-        --bg-main: #F3F4F6;
-        --bg-card: #FFFFFF;
-        --text-main: #1F2937;
-        --text-sub: #6B7280;
-        --radius: 12px;
-    }
-
-    .stApp {
-        background-color: var(--bg-main);
-        color: var(--text-main);
-        font-family: 'Inter', 'Noto Sans TC', sans-serif;
-    }
-    
-    h1 { color: var(--primary-dark) !important; font-weight: 800 !important; text-align: center; margin-bottom: 0.5rem !important; }
-    h2, h3 { color: var(--text-main) !important; font-weight: 700; }
-    p, span, div { color: var(--text-main); }
-    .caption { color: var(--text-sub); font-size: 0.9rem; }
-
-    div[data-testid="stExpander"], div[data-testid="stContainer"] {
-        background: var(--bg-card);
-        border-radius: var(--radius);
-        border: 1px solid #E5E7EB;
-        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-        padding: 24px;
-        margin-bottom: 24px;
-    }
-    
-    /* --- 按鈕樣式強力修正區 Start --- */
-    div.stButton > button {
-        background-color: white;
-        color: var(--text-main);
-        border: 1px solid #D1D5DB;
-        border-radius: 8px;
-        padding: 10px 24px;
-        font-weight: 600;
-        transition: all 0.2s;
-        width: 100%;
-    }
-    div.stButton > button:hover {
-        background-color: #F9FAFB;
-        border-color: var(--primary);
-        color: var(--primary);
-    }
-    div.stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, var(--primary), var(--primary-dark)) !important;
-        border: none !important;
-        box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
-    }
-    div.stButton > button[kind="primary"],
-    div.stButton > button[kind="primary"] > div,
-    div.stButton > button[kind="primary"] p {
-        color: #FFFFFF !important;
-        fill: #FFFFFF !important;
-    }
-    div.stButton > button[kind="primary"]:hover {
-        box-shadow: 0 6px 10px rgba(37, 99, 235, 0.3) !important;
-    }
-    div.stButton > button[kind="primary"]:hover,
-    div.stButton > button[kind="primary"]:hover > div,
-    div.stButton > button[kind="primary"]:hover p {
-        color: #FFFFFF !important;
-    }
-    div.stButton > button[kind="primary"]:focus:not(:active) {
-        border-color: transparent !important;
-        color: #FFFFFF !important;
-    }
-    /* --- 按鈕樣式修正區 End --- */
-
-    .stTextInput > div > div > input, .stNumberInput > div > div > input {
-        background-color: #F9FAFB;
-        color: var(--text-main);
-        border: 1px solid #D1D5DB;
-        border-radius: 8px;
-    }
-    div[data-testid="stMetricValue"] { font-family: 'Inter', sans-serif; font-weight: 700; color: var(--primary-dark) !important; }
-    div[data-testid="stMetricLabel"] { color: var(--text-sub) !important; font-weight: 500; }
-    .stProgress > div > div > div > div { background-color: var(--primary); }
-    section[data-testid="stSidebar"] { background-color: white; border-right: 1px solid #E5E7EB; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 3. 初始化 ---
-ASSET_KEYS = ['Dividend', 'USBond', 'TWStock', 'Cash', 'Crypto']
-ASSET_NAMES = {'Dividend': '分紅收益', 'USBond': '美債', 'TWStock': '台股', 'Cash': '現金', 'Crypto': '加密幣'}
-FINANCE_COLORS = {'分紅收益': '#F59E0B', '美債': '#3B82F6', '台股': '#EF4444', '現金': '#9CA3AF', '加密幣': '#8B5CF6'}
-
-if 'stage' not in st.session_state: st.session_state.stage = 'login'
-if 'year' not in st.session_state: st.session_state.year = 0
-if 'assets' not in st.session_state: st.session_state.assets = {k: 0 for k in ASSET_KEYS}
-if 'history' not in st.session_state: st.session_state.history = []
-if 'user_name' not in st.session_state: st.session_state.user_name = ""
-if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
-if 'config_history' not in st.session_state: st.session_state.config_history = {}
-if 'data_saved' not in st.session_state: st.session_state.data_saved = False
-
-# --- 輔助函數 ---
-def render_asset_snapshot(current_assets, title="📊 當前資產快照"):
-    """渲染資產快照區塊"""
-    st.markdown(f"### {title}")
-    snap_c1, snap_c2 = st.columns([1, 1])
-    
-    with snap_c1:
-        df_snap = pd.DataFrame({
-            'Asset_Name': [ASSET_NAMES[k] for k in ASSET_KEYS],
-            'Value': [current_assets[k] for k in ASSET_KEYS]
-        })
-        fig_snap = px.pie(
-            df_snap, values='Value', names='Asset_Name', 
-            color='Asset_Name', color_discrete_map=FINANCE_COLORS,
-            hole=0.5
-        )
-        fig_snap.update_layout(
-            showlegend=False, margin=dict(l=0, r=0, t=0, b=0), height=200,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            annotations=[dict(text='資產分佈', x=0.5, y=0.5, font_size=14, showarrow=False, font=dict(color='#1F2937'))],
-            font=dict(color='#1F2937')
-        )
-        fig_snap.update_traces(textinfo='percent+label', textposition='inside')
-        st.plotly_chart(fig_snap, use_container_width=True)
-        
-    with snap_c2:
-        total_val = sum(current_assets.values())
-        table_data = []
-        for k in ASSET_KEYS:
-            val = current_assets[k]
-            pct = (val / total_val) * 100 if total_val > 0 else 0
-            table_data.append({"資產": ASSET_NAMES[k], "金額 ($)": f"${int(val):,}", "佔比": f"{pct:.1f}%"})
-        st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
-
-# --- 側邊欄 ---
 ADMIN_PASSWORD = "tsts"
-if 'admin_unlocked' not in st.session_state: st.session_state.admin_unlocked = False
+
+# CSS 樣式
+custom_css = """
+:root { --primary: #2563EB; --primary-dark: #1E40AF; --secondary: #F59E0B; --bg-main: #F3F4F6; }
+body { font-family: 'Inter', 'Noto Sans TC', sans-serif; background-color: var(--bg-main); color: #1F2937; }
+.card { border-radius: 12px; border: 1px solid #E5E7EB; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); background: white; padding: 20px; margin-bottom: 20px; }
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-dark)) !important; border: none; color: white !important; font-weight: 600; }
+.btn-primary:hover { box-shadow: 0 6px 10px rgba(37, 99, 235, 0.3); opacity: 0.9; }
+h1 { color: var(--primary-dark); font-weight: 800; text-align: center; }
+.metric-box { text-align: center; border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px; background: white; }
+.metric-val { font-size: 1.5rem; font-weight: 800; color: var(--primary-dark); }
+.metric-label { font-size: 0.9rem; color: #6B7280; }
+/* Table Style */
+.asset-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.asset-table th { text-align: left; padding: 8px; color: #6B7280; font-size: 0.9rem; border-bottom: 2px solid #E5E7EB; }
+.asset-table td { padding: 12px 8px; border-bottom: 1px solid #F3F4F6; font-weight: 500; }
+.impact-box { padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+"""
+
 # ==========================================
-# 👑 管理員超級控制台 (Admin Super Panel)
+# 🖥️ UI 介面設計
 # ==========================================
-with st.sidebar:
-    st.markdown("### 🏦 IFRC 管理員後台")
-    if not st.session_state.admin_unlocked:
-        st.info("🔒 需要管理員權限")
-        pwd_input = st.text_input("輸入密碼", type="password", key="admin_pwd_input")
-        if pwd_input == ADMIN_PASSWORD:
-            st.session_state.admin_unlocked = True
-            st.rerun()
-    else:
-        st.success("✅ 系統管理權限已解鎖")
+app_ui = ui.page_fluid(
+    ui.head_content(ui.tags.style(custom_css)),
+    
+    # 1. 標題區
+    ui.div(
+        ui.div("IFRC x TS", style="font-size: 0.9rem; font-weight: 800; color: #9CA3AF; letter-spacing: 3px; margin-bottom: 8px; text-transform: uppercase; text-align: center; margin-top: 20px;"),
+        ui.h1("💰 扭轉命運 30 年", style="margin: 0; padding: 0;"),
+        ui.div("Wealth Management Simulation", style="color: #6B7280; font-size: 1.2rem; font-weight: 500; margin-top: 8px; text-align: center; margin-bottom: 30px;"),
+    ),
+
+    # ✨ 使用 ui.layout_sidebar 來正確包覆側邊欄
+    ui.layout_sidebar(
+        # 2. 側邊欄
+        ui.sidebar(
+            ui.h3("🏦 管理員後台"),
+            ui.input_password("admin_pwd", "管理員密碼"),
+            ui.panel_conditional(
+                f"input.admin_pwd == '{ADMIN_PASSWORD}'",
+                ui.h4("🔓 已解鎖", style="color: green"),
+                ui.input_action_button("admin_reset_game", "🔥 清空當前遊戲狀態"),
+                ui.input_action_button("admin_clear_csv", "🧹 清空歷史 CSV"),
+                ui.hr(),
+                ui.download_button("admin_download_csv", "📥 下載 CSV"),
+            ),
+            bg="#FFFFFF", open="closed"
+        ),
         
-        # --- 1. 遊戲進程控制 (跳轉功能) ---
-        with st.expander("🚀 頁面快速跳轉", expanded=False):
-            target_stage = st.selectbox(
-                "切換至階段",
-                options=['login', 'setup', 'playing', 'finished'],
-                index=['login', 'setup', 'playing', 'finished'].index(st.session_state.stage)
+        # 3. 主要內容區
+        ui.navset_hidden(
+            # --- Page 1: Login ---
+            ui.nav_panel("login",
+                ui.layout_columns(
+                    ui.div(), # spacer
+                    ui.div(
+                        ui.div(
+                            ui.img(src="images/homepage.png", style="max-width: 100%; border-radius: 12px;"),
+                            style="text-align: center; margin-bottom: 20px;"
+                        ),
+                        ui.div("扭轉命運的機會就在眼前，準備好了嗎？", style="text-align: center; color: #6B7280; margin-bottom: 20px;"),
+                        ui.input_text("user_name", "請輸入玩家暱稱", placeholder="例如: 小明"),
+                        ui.input_action_button("start_game", "▶ 開始挑戰", class_="btn-primary", style="width: 100%; margin-top: 10px;"),
+                        class_="card"
+                    ),
+                    ui.div(), # spacer
+                    col_widths=(3, 6, 3)
+                ),
+                ui.div(
+                    ui.div(
+                        ui.HTML("<b>製作團隊 IFRC x TS</b><br>🔹 總策劃：Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>🔹 技術支援：Yen<br>🔹 美術支援：Liya<br>🔹 遊戲設計：天行 & IFRC"),
+                        style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); color: #4B5563; font-size: 13px;"
+                    ),
+                    style="text-align: center; margin-top: 30px;"
+                )
+            ),
+
+            # --- Page 2: Setup (Year 0) ---
+            ui.nav_panel("setup",
+                ui.layout_columns(
+                    ui.div(
+                        ui.h3("🚀 初始資產配置"),
+                        ui.p("請分配您的 $1,000,000 資金，總和必須為 100%。"),
+                        ui.output_ui("setup_rates_table"), 
+                        class_="card"
+                    ),
+                    ui.div(
+                        ui.h4("第 0 年配置"),
+                        ui.input_numeric("p_div", f"{ASSET_NAMES['Dividend']} %", 20, min=0, max=100),
+                        ui.input_numeric("p_bond", f"{ASSET_NAMES['USBond']} %", 20, min=0, max=100),
+                        ui.input_numeric("p_stock", f"{ASSET_NAMES['TWStock']} %", 20, min=0, max=100),
+                        ui.input_numeric("p_cash", f"{ASSET_NAMES['Cash']} %", 20, min=0, max=100),
+                        ui.input_numeric("p_crypto", f"{ASSET_NAMES['Crypto']} %", 20, min=0, max=100),
+                        ui.output_ui("setup_status"), 
+                        ui.input_action_button("confirm_setup", "確定配置 ✅", class_="btn-primary", style="width: 100%"),
+                        class_="card"
+                    ),
+                    col_widths=(7, 5)
+                )
+            ),
+
+            # --- Page 3: Playing ---
+            ui.nav_panel("playing",
+                # Top Dashboard
+                ui.div(
+                    ui.layout_columns(
+                        ui.div(ui.div("目前年份", class_="metric-label"), ui.output_text("ui_year", inline=True), class_="metric-box"),
+                        ui.div(ui.div("總資產", class_="metric-label"), ui.output_text("ui_wealth", inline=True), class_="metric-box"),
+                        ui.div(ui.div("累積報酬率", class_="metric-label"), ui.output_text("ui_roi", inline=True), class_="metric-box"),
+                    ),
+                    style="margin-bottom: 20px;"
+                ),
+                
+                ui.div(ui.output_ui("ui_progress_bar"), style="margin-bottom: 20px;"),
+
+                # Dynamic Interaction Area
+                ui.output_ui("game_interaction_area"),
+                
+                ui.br(),
+                ui.layout_columns(
+                    ui.div(
+                        ui.h4("📊 當前資產分佈"),
+                        output_widget("chart_assets_now"),
+                        class_="card"
+                    ),
+                    ui.div(
+                        ui.h4("💰 資產詳細清單"),
+                        # 🔥 新增：這裡顯示實際金額表格
+                        ui.output_ui("ui_current_assets_detail"),
+                        class_="card"
+                    ),
+                    col_widths=(6, 6)
+                )
+            ),
+
+            # --- Page 4: Finished ---
+            ui.nav_panel("finished",
+                ui.div(
+                    ui.h1("🏆 挑戰完成！", style="color: #F59E0B"),
+                    ui.output_ui("ig_share_card"), 
+                    ui.br(),
+                    ui.layout_columns(
+                        ui.div(ui.div("最終資產", style="color: #92400E"), ui.div(ui.output_text("final_wealth_text"), style="font-size: 32px; font-weight: 800; color: #D97706"), style="background: #FFFBEB; padding: 20px; border-radius: 12px; border: 1px solid #F59E0B"),
+                        ui.div(ui.div("總報酬率", style="color: #065F46"), ui.div(ui.output_text("final_roi_text"), style="font-size: 32px; font-weight: 800; color: #059669"), style="background: #ECFDF5; padding: 20px; border-radius: 12px; border: 1px solid #10B981"),
+                    ),
+                    ui.hr(),
+                    ui.h4("📈 歷史資產走勢"),
+                    output_widget("chart_history_area"),
+                    ui.hr(),
+                    ui.h4("🎛️ 歷史配置策略"),
+                    output_widget("chart_config_history"),
+                    ui.hr(),
+                    ui.h4("🎴 命運歷程"),
+                    ui.output_ui("history_cards_list"),
+                    ui.hr(),
+                    ui.input_text_area("feedback", "請留下您的心得", width="100%"),
+                    ui.input_action_button("save_finish", "💾 儲存並結束", class_="btn-primary"),
+                    ui.br(), ui.br(),
+                    ui.input_action_button("restart_game", "🔄 開啟新挑戰"),
+                    style="text-align: center; padding: 20px;"
+                )
+            ),
+
+            id="wizard" 
+        )
+    )
+)
+
+# ==========================================
+# 🧠 Server 邏輯核心
+# ==========================================
+def server(input: Inputs, output: Outputs, session: Session):
+    
+    # --- Reactive State ---
+    game_state = reactive.Value({
+        "year": 0,
+        "assets": {k: 0 for k in ASSET_KEYS},
+        "history": [],
+        "config_history": {},
+        "drawn_cards": [],
+        "sub_stage": "wait_jump", 
+        "dynamic_rates": BASE_RATES.copy(),
+        "user_name": ""
+    })
+    
+    # --- 1. Login ---
+    @reactive.Effect
+    @reactive.event(input.start_game)
+    def _():
+        name = input.user_name().strip()
+        if name:
+            gs = copy.deepcopy(game_state.get())
+            gs["user_name"] = name
+            game_state.set(gs)
+            ui.update_navs("wizard", selected="setup")
+        else:
+            ui.notification_show("請輸入暱稱！", type="error")
+
+    # --- 2. Setup ---
+    @render.ui
+    def setup_rates_table():
+        rows = ""
+        risk_map = {'Dividend': '低', 'USBond': '極低', 'TWStock': '中高', 'Cash': '無', 'Crypto': '極高'}
+        for k in ASSET_KEYS:
+            rows += f"<tr><td>{ASSET_NAMES[k]}</td><td>{int(BASE_RATES[k]*100)}%</td><td>{risk_map[k]}</td></tr>"
+        return ui.HTML(f"<table class='table table-striped'><thead><tr><th>資產</th><th>年化</th><th>風險</th></tr></thead><tbody>{rows}</tbody></table>")
+
+    @render.ui
+    def setup_status():
+        try:
+            v1, v2, v3, v4, v5 = input.p_div(), input.p_bond(), input.p_stock(), input.p_cash(), input.p_crypto()
+            if any(x is None for x in [v1, v2, v3, v4, v5]):
+                return ui.div()
+                
+            total = v1 + v2 + v3 + v4 + v5
+            color = "green" if abs(total - 100) < 0.1 else "red"
+            return ui.div(f"目前總和: {total}% (目標: 100%)", style=f"color: {color}; font-weight: bold; margin: 10px 0;")
+        except:
+            return ui.div()
+
+    @reactive.Effect
+    @reactive.event(input.confirm_setup)
+    def _():
+        try:
+            total = input.p_div() + input.p_bond() + input.p_stock() + input.p_cash() + input.p_crypto()
+        except TypeError:
+            return 
+
+        if abs(total - 100) > 0.1:
+            ui.notification_show("比例總和必須為 100%！", type="error")
+            return
+
+        initial = 1000000
+        props = [input.p_div(), input.p_bond(), input.p_stock(), input.p_cash(), input.p_crypto()]
+        gs = copy.deepcopy(game_state.get())
+        
+        new_assets = {}
+        for i, k in enumerate(ASSET_KEYS):
+            new_assets[k] = initial * (props[i] / 100)
+            
+        gs["assets"] = new_assets
+        gs["history"] = [{'Year': 0, 'Total': initial, **new_assets}]
+        gs["config_history"]['Year 0'] = {k: v for k, v in zip(ASSET_KEYS, props)}
+        gs["year"] = 0
+        gs["sub_stage"] = "wait_jump"
+        game_state.set(gs)
+        ui.update_navs("wizard", selected="playing")
+
+    # --- 3. Playing Core Logic ---
+    @render.text 
+    def ui_year(): return f"第 {game_state.get()['year']} 年"
+    
+    @render.text 
+    def ui_wealth(): return f"${int(sum(game_state.get()['assets'].values())):,}"
+    
+    @render.text 
+    def ui_roi(): 
+        hist = game_state.get()['history']
+        if not hist: return "0%"
+        start = hist[0]['Total']
+        curr = sum(game_state.get()['assets'].values())
+        return f"{(curr - start) / start * 100:.1f}%"
+
+    @render.ui
+    def ui_progress_bar():
+        y = game_state.get()['year']
+        pct = (y / 30) * 100
+        return ui.HTML(f'<div style="width:100%; background:#E5E7EB; height:8px; border-radius:4px;"><div style="width:{pct}%; background:var(--primary); height:100%; border-radius:4px;"></div></div>')
+
+    # 🔥 新增功能 1: 顯示當前資產詳細金額表格
+    @render.ui
+    def ui_current_assets_detail():
+        assets = game_state.get()['assets']
+        total = sum(assets.values())
+        
+        rows = ""
+        for k in ASSET_KEYS:
+            val = assets[k]
+            pct = (val / total * 100) if total > 0 else 0
+            rows += f"""
+            <tr>
+                <td style="color:{FINANCE_COLORS[ASSET_NAMES[k]]}; font-weight:bold;">{ASSET_NAMES[k]}</td>
+                <td>${int(val):,}</td>
+                <td>{pct:.1f}%</td>
+            </tr>
+            """
+        
+        return ui.HTML(f"""
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>項目</th>
+                    <th>金額 ($)</th>
+                    <th>佔比</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
+        """)
+
+    @render.ui
+    def game_interaction_area():
+        gs = game_state.get()
+        sub = gs["sub_stage"]
+        year = gs["year"]
+        
+        if sub == "wait_jump":
+            btn_txt = f"🚀 啟動時光機 (前往第 {year+10} 年)" if year == 0 else f"🚀 前往下一個十年 (Year {year+10})"
+            return ui.div(
+                ui.h3(f"⏩ 準備推進: 第 {year+1} - {year+10} 年"),
+                ui.input_action_button("btn_jump_time", btn_txt, class_="btn-primary", style="font-size: 1.2rem; padding: 15px; width: 100%;"),
+                class_="card", style="background: #F0F9FF; border-left: 5px solid #3B82F6;"
             )
-            target_year = st.slider("調整當前年份", 0, 30, st.session_state.year)
-            # 在管理員後台的「執行跳轉」按鈕中加入自動補數據邏輯
-            if st.button("執行強制跳轉"):
-                st.session_state.stage = target_stage
-                st.session_state.year = target_year
-                
-                # 🔥 如果跳轉到結束頁且目前沒數據，塞入一筆假資料防止報錯
-                if target_stage == 'finished' and not st.session_state.history:
-                    st.session_state.history = [{'Year': 0, 'Total': 1000000}]
-                    # 給予一些預設資產數值
-                    for k in ASSET_KEYS:
-                        st.session_state.assets[k] = 200000 
-                        
-                st.session_state.waiting_for_event = False
-                st.session_state.waiting_for_rebalance = False
-                st.rerun()
 
-        # --- 2. 動態市場調控 (上帝模式) ---
-        with st.expander("📈 市場動態環境調控", expanded=False):
-            st.caption("調整後的基礎利率將影響下一個『10年跳轉』。")
-            updated_rates = {}
+        elif sub == "event_input":
+            return ui.div(
+                ui.h2(f"⚡ 重大財經事件發生 (Year {year})", style="color: #EF4444; text-align: center;"),
+                ui.layout_columns(
+                    ui.div(
+                        ui.input_text("event_code_input", "請輸入卡片代碼 (3碼)", placeholder="例如: 101"),
+                        ui.output_ui("event_card_display"),
+                        # 🔥 新增功能 2: 顯示衝擊預覽
+                        ui.output_ui("event_impact_preview"),
+                        ui.output_ui("event_apply_btn_area") 
+                    ),
+                    ui.div(
+                        ui.output_ui("event_card_image") 
+                    )
+                ),
+                class_="card"
+            )
+
+        elif sub == "rebalance":
+            inputs = [ui.input_numeric(f"rb_{k}", f"{ASSET_NAMES[k]} %", 0, min=0, max=100) for k in ASSET_KEYS]
+            return ui.div(
+                ui.h3(f"⚖️ 資產再平衡 (Year {year})"),
+                ui.p("衝擊已發生，請調整您的投資組合。"),
+                ui.layout_columns(*inputs),
+                ui.output_ui("rebalance_status"), 
+                ui.input_action_button("btn_confirm_rebalance", "執行配置 ✅", class_="btn-primary"),
+                class_="card", style="background: #ECFDF5; border-left: 5px solid #10B981;"
+            )
+        return ui.div()
+
+    # --- Jump Logic ---
+    @reactive.Effect
+    @reactive.event(input.btn_jump_time)
+    def _():
+        gs = copy.deepcopy(game_state.get())
+        current_year = gs["year"]
+        rates = gs["dynamic_rates"]
+        
+        for _ in range(10):
             for k in ASSET_KEYS:
-                updated_rates[k] = st.slider(f"{ASSET_NAMES[k]} 年化", -0.20, 0.20, st.session_state.dynamic_rates[k], step=0.01, format="%.2f")
-            if st.button("儲存新市場設定"):
-                st.session_state.dynamic_rates = updated_rates
-                st.toast("市場參數已更新！", icon="🌍")
+                gs["assets"][k] *= (1 + rates[k])
+            current_year += 1
+            rec = {'Year': current_year, 'Total': sum(gs["assets"].values()), **gs["assets"]}
+            gs["history"].append(rec)
+            
+        gs["year"] = current_year
+        gs["sub_stage"] = "event_input"
+        game_state.set(gs)
 
-        # --- 3. 即時戰況與數據導出 ---
-        with st.expander("📊 現場數據監控", expanded=True):
-            if os.path.exists(CSV_FILE):
-                df_rec = pd.read_csv(CSV_FILE)
-                st.write(f"目前累積完賽人數: `{len(df_rec)}`")
-                if not df_rec.empty:
-                    lb = df_rec[['姓名', '最終資產', '報酬率(%)']].sort_values(by='最終資產', ascending=False)
-                    st.dataframe(lb.head(5), hide_index=True)
+    # --- Event Logic ---
+    @render.ui
+    def event_card_image():
+        try:
+            code = input.event_code_input().strip()
+        except:
+            code = ""
+            
+        if code in EVENT_CARDS:
+             return ui.img(src=f"images/{code}.png", style="width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);")
+        else:
+             return ui.img(src="images/homepage.png", style="width: 100%; opacity: 0.5;")
+
+    @render.ui
+    def event_card_display():
+        try:
+            code = input.event_code_input().strip()
+        except:
+            return ui.div()
+            
+        if code in EVENT_CARDS:
+            card = EVENT_CARDS[code]
+            return ui.div(
+                ui.h3(card['name'], style="color: #1E40AF;"),
+                ui.p(card['desc'], style="font-size: 1.1rem;"),
+                style="background: #EFF6FF; padding: 15px; border-radius: 8px; margin-top: 10px;"
+            )
+        return ui.div()
+
+    # 🔥 實作功能 2: 計算並顯示衝擊影響金額
+    @render.ui
+    def event_impact_preview():
+        try:
+            code = input.event_code_input().strip()
+        except:
+            return ui.div()
+            
+        if code in EVENT_CARDS:
+            card = EVENT_CARDS[code]
+            assets = game_state.get()['assets']
+            
+            impact_html = ""
+            for k in ASSET_KEYS:
+                card_key = KEY_MAPPING[k]
+                pct_change = card[card_key]
                 
-                with open(CSV_FILE, "rb") as f:
-                    st.download_button("📥 下載完整 CSV", data=f, file_name="final_report.csv", mime="text/csv")
-            else:
-                st.info("尚無玩家數據")
-
-        # --- 4. 系統維護 ---
-        with st.expander("🧹 危險區域", expanded=False):
-            if st.button("🔥 清空所有歷史記錄"):
-                if os.path.exists(CSV_FILE):
-                    os.remove(CSV_FILE)
-                    st.success("數據已清空")
-                    st.rerun()
-
-        st.markdown("---")
-        if st.button("🔒 重新鎖定系統"):
-            st.session_state.admin_unlocked = False
-            st.rerun()
-# --- 標題 ---
-st.markdown("""
-    <div style="text-align: center; padding: 20px 0 40px 0;">
-        <div style="
-            font-size: 0.9rem; 
-            font-weight: 800; 
-            color: #9CA3AF; 
-            letter-spacing: 3px; 
-            margin-bottom: 8px;
-            font-family: 'Inter', sans-serif;
-            text-transform: uppercase;
-        ">
-            IFRC <span style="color: #F59E0B;">x</span> TS
-        </div>
-        <h1 style="
-            font-size: 2.5rem; 
-            color: #1E40AF; 
-            font-weight: 800; 
-            letter-spacing: -0.5px; 
-            margin: 0;
-            padding: 0;
-        ">
-            💰 扭轉命運 30 年
-        </h1>
-        <div style="
-            color: #6B7280; 
-            font-size: 1.2rem; 
-            font-weight: 500; 
-            margin-top: 8px;
-        ">
-            Wealth Management Simulation
-        </div>
-    </div>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# 階段 0: 登入
-# ==========================================
-if st.session_state.stage == 'login':
-    with st.container():
-        st.markdown("<div style='text-align: center; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
-        
-        img_c1, img_c2, img_c3 = st.columns([1, 1, 1])
-        with img_c2:
-            image_path = "images/homepage.png"
-            if os.path.exists(image_path):
-                st.image(image_path, use_container_width=True) 
-            else:
-                st.info("📷 圖片讀取中...")
-
-        st.markdown("<div style='text-align: center; color: #6B7280; font-size: 0.9rem; margin-bottom: 20px;'>扭轉命運的機會就在眼前，準備好了嗎？</div>", unsafe_allow_html=True)
-        
-        input_c1, input_c2, input_c3 = st.columns([1, 2, 1])
-        with input_c2:
-            name_input = st.text_input("請輸入玩家暱稱", placeholder="例如: 小明", key="login_name")
-            st.write("")
-            if st.button("▶ 開始挑戰", type="primary"):
-                if name_input.strip():
-                    st.session_state.user_name = name_input
-                    st.session_state.stage = 'setup'
-                    st.session_state.data_saved = False
-                    st.rerun()
+                # 計算實際影響金額
+                current_val = assets[k]
+                impact_val = current_val * (pct_change / 100)
+                
+                # 決定顏色 (正為綠，負為紅)
+                if pct_change < 0:
+                    bg_color = "#FEF2F2"
+                    text_color = "#EF4444"
+                    sign = "-"
+                    arrow = "▼"
+                elif pct_change > 0:
+                    bg_color = "#ECFDF5"
+                    text_color = "#10B981"
+                    sign = "+"
+                    arrow = "▲"
                 else:
-                    st.warning("⚠️ 請輸入暱稱以開始遊戲")
+                    bg_color = "#F3F4F6"
+                    text_color = "#6B7280"
+                    sign = ""
+                    arrow = "-"
 
-        # 👇 在登入按鈕下方加入這段
-        st.markdown("---")
-        st.markdown("""
-        <div style="text-align: center; color: #9CA3AF; font-size: 13px; margin-top: 20px;">
-            <div style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">製作團隊IFRCxTS</div>
-                🔹 <b>總策劃：</b>Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
-                🔹 <b>技術支援：</b> Yen <br> 
-                🔹 <b>美術支援：</b> Liya <br>    
-                🔹 <b>遊戲設計：</b> 天行 & IFRC<br>
+                impact_html += f"""
+                <div style="flex: 1; background: {bg_color}; padding: 8px; border-radius: 8px; margin: 0 4px; text-align: center; border: 1px solid {text_color}33;">
+                    <div style="font-size: 11px; color: #6B7280;">{ASSET_NAMES[k]}</div>
+                    <div style="font-size: 16px; font-weight: bold; color: {text_color};">{arrow} {abs(pct_change)}%</div>
+                    <div style="font-size: 12px; font-weight: 600; color: {text_color}; margin-top: 4px;">
+                        {sign}${int(abs(impact_val)):,}
+                    </div>
+                </div>
+                """
+
+            return ui.HTML(f"""
+                <div style="margin-top: 15px;">
+                    <h5 style="color: #4B5563; font-size: 0.9rem;">📉 資產衝擊預覽 (預估損益)</h5>
+                    <div style="display: flex; justify-content: space-between; gap: 4px;">
+                        {impact_html}
+                    </div>
+                </div>
+            """)
+        return ui.div()
+
+    @render.ui
+    def event_apply_btn_area():
+        try:
+            code = input.event_code_input().strip()
+        except:
+            return ui.div()
+            
+        if code in EVENT_CARDS:
+            return ui.input_action_button("btn_apply_event", "迎接命運衝擊 📉", class_="btn-primary", style="margin-top: 15px; width: 100%;")
+        return ui.div()
+
+    @reactive.Effect
+    @reactive.event(input.btn_apply_event)
+    def _():
+        try:
+            code = input.event_code_input().strip()
+        except: return
+
+        if code not in EVENT_CARDS: return
+        
+        card = EVENT_CARDS[code]
+        gs = copy.deepcopy(game_state.get())
+        
+        for k in ASSET_KEYS:
+            card_key = KEY_MAPPING[k]
+            pct = card[card_key]
+            gs["assets"][k] = gs["assets"][k] * (1 + pct/100)
+
+        gs["drawn_cards"].append(f"第 {gs['year']} 年: [{code}] {card['name']}")
+        rec = gs["history"][-1]
+        rec.update(gs["assets"])
+        rec['Total'] = sum(gs["assets"].values())
+        
+        if gs["year"] >= 30:
+            ui.update_navs("wizard", selected="finished")
+        else:
+            gs["sub_stage"] = "rebalance"
+            total = sum(gs["assets"].values())
+            for k in ASSET_KEYS:
+                pct = (gs["assets"][k] / total * 100) if total > 0 else 0
+                ui.update_numeric(f"rb_{k}", value=round(pct, 1))
+                
+        game_state.set(gs)
+        ui.update_text("event_code_input", value="")
+
+    # --- Rebalance Logic ---
+    @render.ui
+    def rebalance_status():
+        if game_state.get()["sub_stage"] != "rebalance":
+            return ui.div()
+            
+        try:
+            values = []
+            for k in ASSET_KEYS:
+                val = input[f"rb_{k}"]()
+                if val is None: return ui.div()
+                values.append(val)
+            
+            total = sum(values)
+            color = "green" if abs(total - 100) < 0.1 else "red"
+            return ui.div(f"合計: {total:.1f}%", style=f"color: {color}; font-weight: bold;")
+        except KeyError:
+            return ui.div()
+
+    @reactive.Effect
+    @reactive.event(input.btn_confirm_rebalance)
+    def _():
+        try:
+            values = [input[f"rb_{k}"]() for k in ASSET_KEYS]
+            if any(v is None for v in values): return
+            
+            total = sum(values)
+            if abs(total - 100) > 0.1:
+                ui.notification_show("比例總和必須為 100%！", type="error")
+                return
+                
+            gs = copy.deepcopy(game_state.get())
+            current_total = sum(gs["assets"].values())
+            
+            for i, k in enumerate(ASSET_KEYS):
+                gs["assets"][k] = current_total * (values[i] / 100)
+                
+            gs["config_history"][f"Year {gs['year']}"] = {k: v for k, v in zip(ASSET_KEYS, values)}
+            gs["history"][-1].update(gs["assets"])
+            gs["sub_stage"] = "wait_jump"
+            game_state.set(gs)
+        except KeyError:
+            pass
+
+    # --- Charts ---
+    @render_widget
+    def chart_assets_now():
+        assets = game_state.get()['assets']
+        df = pd.DataFrame({'Asset': [ASSET_NAMES[k] for k in ASSET_KEYS], 'Value': list(assets.values())})
+        fig = px.pie(df, values='Value', names='Asset', color='Asset', color_discrete_map=FINANCE_COLORS, hole=0.5)
+        fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=250)
+        return fig
+
+    # --- Finished Logic ---
+    @render.text
+    def final_wealth_text():
+        return f"${int(sum(game_state.get()['assets'].values())):,}"
+        
+    @render.text
+    def final_roi_text():
+        hist = game_state.get()['history']
+        if not hist: return "0%"
+        start = hist[0]['Total']
+        curr = sum(game_state.get()['assets'].values())
+        return f"{(curr - start) / start * 100:+.1f}%"
+
+    @render.ui
+    def ig_share_card():
+        hist = game_state.get()['history']
+        if not hist: return ui.div()
+        final_w = sum(game_state.get()['assets'].values())
+        roi = (final_w - hist[0]['Total']) / hist[0]['Total'] * 100
+        
+        if roi < 0:
+            title, desc, bg = "💸 破產俱樂部", "黑天鵝來襲！波動性吃掉了你的本金...", "linear-gradient(135deg, #7f1d1d, #ef4444)"
+        elif roi < 200:
+            title, desc, bg = "🐢 佛系定存族", "這30年你只贏了帳面，卻輸給了真實通膨。", "linear-gradient(135deg, #4b5563, #9ca3af)"
+        elif roi < 600:
+            title, desc, bg = "💼 理財老手", "表現穩健！這是大多數普通人退休目標。", "linear-gradient(135deg, #059669, #34d399)"
+        elif roi < 1200:
+            title, desc, bg = "🚀 自由財富號", "眼光精準！你的資產成長速度驚人。", "linear-gradient(135deg, #7c3aed, #a78bfa)"
+        else:
+            title, desc, bg = "👑 投資界的神", "30年資產翻了10倍以上，巴菲特都要叫你老師！", "linear-gradient(135deg, #b45309, #fbbf24)"
+
+        return ui.HTML(f"""
+        <div style="width: 100%; max-width: 380px; margin: 0 auto; background: {bg}; border-radius: 20px; padding: 30px 20px; color: white; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; border: 4px solid rgba(255,255,255,0.2);">
+            <div style="font-size: 40px; margin-bottom: 10px;">{title.split(' ')[0]}</div>
+            <div style="font-size: 28px; font-weight: 800;">{title.split(' ')[1]}</div>
+            <div style="font-style: italic; opacity: 0.9; margin: 10px 0;">“{desc}”</div>
+            <div style="background: rgba(255,255,255,0.9); color: #1F2937; border-radius: 12px; padding: 10px; margin: 15px 0;">
+                <div style="font-size: 12px;">最終資產</div>
+                <div style="font-size: 32px; font-weight: 800;">${int(final_w):,}</div>
             </div>
+            <div style="font-size: 12px; opacity: 0.8;">玩家: {game_state.get()['user_name']} | ROI: {roi:+.1f}%</div>
         </div>
-        """, unsafe_allow_html=True)
-# ==========================================
-# 階段 1: Setup
-# ==========================================
-elif st.session_state.stage == 'setup':
-    with st.container():
-        st.markdown(f"### 🚀 初始資產配置 (玩家: {st.session_state.user_name})")
+        """)
+
+    @render_widget
+    def chart_history_area():
+        df = pd.DataFrame(game_state.get()['history'])
+        if df.empty: return None
+        df_melt = df.melt(id_vars=['Year', 'Total'], value_vars=ASSET_KEYS, var_name='Asset_Type', value_name='Value')
+        df_melt['Asset_Name'] = df_melt['Asset_Type'].map(ASSET_NAMES)
+        fig = px.area(df_melt, x="Year", y="Value", color="Asset_Name", color_discrete_map=FINANCE_COLORS)
+        return fig
+
+    @render_widget
+    def chart_config_history():
+        cfg = game_state.get()['config_history']
+        if not cfg: return None
+        df_c = pd.DataFrame(cfg).T.rename(columns=ASSET_NAMES).reset_index().melt(id_vars='index', var_name='Asset', value_name='Pct')
+        fig = px.bar(df_c, x='index', y='Pct', color='Asset', color_discrete_map=FINANCE_COLORS)
+        return fig
+
+    @render.ui
+    def history_cards_list():
+        cards = game_state.get()['drawn_cards']
+        if not cards: return ui.p("無事件發生")
+        items = [ui.div(c, style="background: #FFF7ED; padding: 10px; border-left: 4px solid #F59E0B; margin-bottom: 5px;") for c in cards]
+        return ui.div(*items)
+
+    @reactive.Effect
+    @reactive.event(input.save_finish)
+    def _():
+        gs = game_state.get()
+        roi = (sum(gs['assets'].values()) - 1000000) / 1000000 * 100
         
-        # --- 🔥 新增：基礎利率參考表 ---
-        st.markdown("#### ℹ️ 市場基礎利率表 (無事件影響下)")
-        st.caption("這是各類資產在「風平浪靜」時的理論年化報酬率，請作為配置參考。")
-        
-        # 準備表格數據
-        rate_data = []
-        risk_map = {
-            'Dividend': '低 (穩定現金流)',
-            'USBond': '極低 (避險首選)',
-            'TWStock': '中高 (隨景氣波動)',
-            'Cash': '無 (會被通膨侵蝕)',
-            'Crypto': '極高 (心跳漏一拍)'
+        file_exists = os.path.isfile(CSV_FILE)
+        data = {
+            '時間': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            '姓名': gs['user_name'],
+            '最終資產': int(sum(gs['assets'].values())),
+            '報酬率(%)': round(roi, 1),
+            '抽卡歷程': " | ".join(gs['drawn_cards']),
+            '配置_Year0': str(gs['config_history'].get('Year 0', '')),
+            '玩家反饋': input.feedback()
         }
+        with open(CSV_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=data.keys())
+            if not file_exists: writer.writeheader()
+            writer.writerow(data)
         
-        for key in ASSET_KEYS:
-            rate_data.append({
-                "資產項目": ASSET_NAMES[key],
-                "基礎年化報酬": f"{int(BASE_RATES[key]*100)}%",
-                "風險屬性": risk_map.get(key, "未知")
-            })
-            
-        df_rates = pd.DataFrame(rate_data)
-        
-        # 顯示表格 (use_container_width讓表格撐滿寬度，看起來比較大器)
-        st.dataframe(
-            df_rates, 
-            hide_index=True, 
-            use_container_width=True,
-            column_config={
-                "資產項目": st.column_config.TextColumn("資產項目", help="資產的種類"),
-                "基礎年化報酬": st.column_config.TextColumn("基礎年化報酬", help="每年預期會自動增長的比例"),
-            }
-        )
-        st.markdown("---")
-        # ----------------------------------
+        ui.notification_show("✅ 數據已儲存！", type="message")
 
-        col_cap, col_space = st.columns([1, 2])
-        with col_cap:
-            initial_wealth = 1000000
-            st.metric("💰 起始資金 (固定)", f"${initial_wealth:,}", help="所有玩家起跑點皆相同")
-        
-        st.markdown("#### 📊 第 0 年資產比例配置 (%)")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        p1 = c1.number_input(f"{ASSET_NAMES['Dividend']}", 0, 100, 20)
-        p2 = c2.number_input(f"{ASSET_NAMES['USBond']}", 0, 100, 20)
-        p3 = c3.number_input(f"{ASSET_NAMES['TWStock']}", 0, 100, 20)
-        p4 = c4.number_input(f"{ASSET_NAMES['Cash']}", 0, 100, 20)
-        p5 = c5.number_input(f"{ASSET_NAMES['Crypto']}", 0, 100, 20)
-        
-        current_sum = p1+p2+p3+p4+p5
-        if current_sum != 100:
-            st.markdown(f"""
-                <div style="background-color: #FEF2F2; color: #991B1B; padding: 12px; border-radius: 8px; border: 1px solid #FCA5A5; text-align: center; font-weight: 600;">
-                    ⚠️ 目前總和為 {current_sum}% (目標: 100%)
-                </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.write("")
-            if st.button("確定配置 ✅", type="primary"):
-                props = [p1, p2, p3, p4, p5]
-                st.session_state.config_history['Year 0'] = {k: v for k, v in zip(ASSET_KEYS, props)}
-                for i, key in enumerate(ASSET_KEYS):
-                    st.session_state.assets[key] = initial_wealth * (props[i] / 100)
-                
-                record = {'Year': 0, 'Total': initial_wealth}
-                record.update(st.session_state.assets)
-                st.session_state.history.append(record)
-                st.session_state.stage = 'playing'
-                st.rerun()
+    @reactive.Effect
+    @reactive.event(input.restart_game, input.admin_reset_game)
+    def _():
+        game_state.set({
+            "year": 0, "assets": {k: 0 for k in ASSET_KEYS}, "history": [],
+            "config_history": {}, "drawn_cards": [], "sub_stage": "wait_jump",
+            "dynamic_rates": BASE_RATES.copy(), "user_name": ""
+        })
+        ui.update_navs("wizard", selected="login")
 
-# ==========================================
-# 階段 2: 遊戲進行中 (Playing)
-# ==========================================
-elif st.session_state.stage == 'playing':
-    total = sum(st.session_state.assets.values())
-    roi = (total - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
-    
-    with st.container():
-        c_year, c_wealth, c_roi = st.columns(3)
-        c_year.metric("目前年份", f"第 {st.session_state.year} 年", delta=f"剩餘 {30-st.session_state.year} 年", delta_color="off")
-        c_wealth.metric("總資產", f"${int(total):,}")
-        c_roi.metric("累積報酬率", f"{roi:.1f}%", delta_color="normal")
-        st.write("")
-        st.progress(st.session_state.year / 30)
+    @render.download(filename="game_data_records.csv")
+    def admin_download_csv():
+        if os.path.exists(CSV_FILE):
+            return CSV_FILE
 
-    current_year = st.session_state.year
-    
-# --- 1. 抽卡事件 ---
-    if st.session_state.get('waiting_for_event', False):
-        with st.container():
-            
-            render_asset_snapshot(st.session_state.assets, title="📊 衝擊前資產快照")
-            st.markdown("---")
-            st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
-            
-            # ==========================================
-            # 🃏 神秘封面圖邏輯 (新增部分)
-            # ==========================================
-            # 1. 先從 session_state 抓取目前輸入框的值 (如果有)
-            current_input = st.session_state.get("event_card_input", "")
-            temp_code = str(current_input).strip()
-            
-            # 2. 如果輸入的代碼還沒通過驗證 (是空的 或 錯誤代碼)，就顯示封面圖
-            if temp_code not in EVENT_CARDS:
-                cover_img = "images/homepage.png" # 請準備這張「卡背」圖片
-                cover_c1, cover_c2, cover_c3 = st.columns([1, 1, 1])
-                with cover_c2:
-                    if os.path.exists(cover_img):
-                        st.image(cover_img, use_container_width=True, caption="請輸入卡片代碼翻開命運...")
-                    else:
-                        # 如果找不到圖，顯示一個大大的問號
-                        st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
-            # ==========================================
-            
-            col_input, col_status = st.columns([2, 1])
-            
-            # 🔥 關鍵：加入 key="event_card_input" 
-            # 這樣上面的邏輯才能在我們打字時，即時抓到值並把封面圖隱藏
-            input_code = col_input.text_input(
-                "請在此輸入卡片代碼 (3碼)",
-                placeholder="例如: 101", 
-                help="請查看您抽到的實體卡片，輸入上面的3位數編號 (例如 101, 102...)",
-                key="event_card_input"
-            )
-            clean_code = str(input_code).strip()
-            
-            if clean_code in EVENT_CARDS:
-                card_data = EVENT_CARDS[clean_code]
-                image_path = f"images/{clean_code}.png"
-                
-                # 這裡顯示真正的卡片內容 (原本的程式碼)
-                col_img, col_desc = st.columns([1, 2])
-                with col_img:
-                    if os.path.exists(image_path): st.image(image_path, use_container_width=True)
-                    else: st.info("📷 No Image")
-                with col_desc:
-                    st.markdown(f"""<div style="background: #F0F9FF; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; height: 100%;"><h3 style="margin-top: 0; color: #1E40AF !important;">{card_data['name']}</h3><p style="font-size: 1.1rem; color: #374151;">{card_data['desc']}</p></div>""", unsafe_allow_html=True)
-                
-                st.write("")
-                st.write("#### 📊 市場衝擊預覽 (預估損益)")
-                cols = st.columns(5)
-                key_map = {'dividend': 'Dividend', 'bond': 'USBond', 'stock': 'TWStock', 'cash': 'Cash', 'crypto': 'Crypto'}
-                metrics = [('分紅收益', 'dividend'), ('美債', 'bond'), ('台股', 'stock'), ('現金', 'cash'), ('加密幣', 'crypto')]
-                
-                for i, (name, card_key) in enumerate(metrics):
-                    asset_key = key_map[card_key]
-                    pct_change = card_data[card_key]
-                    current_val = st.session_state.assets[asset_key]
-                    impact_val = current_val * (pct_change / 100)
-                    color = '#EF4444' if pct_change < 0 else ('#10B981' if pct_change > 0 else '#6B7280')
-                    arrow = '▼' if pct_change < 0 else ('▲' if pct_change > 0 else '-')
-                    sign = '' if pct_change < 0 else ('+' if pct_change > 0 else '')
-                    
-                    cols[i].markdown(f"""<div style="text-align: center; background: #fff; padding: 12px 5px; border-radius: 8px; border: 1px solid #E5E7EB; height: 100%;"><div style="color: #6B7280; font-size: 13px; margin-bottom: 4px;">{name}</div><div style="color: {color}; font-size: 20px; font-weight: bold; line-height: 1;">{arrow} {abs(pct_change)}%</div><div style="color: {color}; font-size: 14px; font-weight: 600; margin-top: 6px; background-color: {'#FEF2F2' if pct_change < 0 else '#ECFDF5'}; padding: 2px 4px; border-radius: 4px;">{sign}${int(impact_val):,}</div></div>""", unsafe_allow_html=True)
+# ⚠️ Confirm Static Directory
+app_dir = Path(__file__).parent
+app = App(app_ui, server, static_assets=app_dir / "www")
 
-                st.write("")
-                # 修改按鈕文字增加帶入感
-                if st.button("迎接命運衝擊 📉", type="primary"):
-                    st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
-                    st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
-                    st.session_state.assets['TWStock']  *= (1 + card_data['stock']/100)
-                    st.session_state.assets['Cash']     *= (1 + card_data['cash']/100)
-                    st.session_state.assets['Crypto']   *= (1 + card_data['crypto']/100)
-                    st.session_state.drawn_cards.append(f"第 {current_year} 年: [{clean_code}] {card_data['name']}")
-                    last_rec = st.session_state.history[-1]
-                    last_rec.update(st.session_state.assets)
-                    last_rec['Total'] = sum(st.session_state.assets.values())
-                    st.session_state.waiting_for_event = False
-                    if current_year >= 30: st.session_state.stage = 'finished'
-                    else: st.session_state.waiting_for_rebalance = True
-                    st.rerun()
-
-    # --- 2. 再平衡階段 ---
-    elif st.session_state.get('waiting_for_rebalance', False):
-        with st.container():
-            current_total = sum(st.session_state.assets.values())
-            
-            render_asset_snapshot(st.session_state.assets, title="📊 衝擊後資產現況 (請進行再平衡)")
-            st.markdown("---")
-
-            st.markdown(f"### ⚖️ 資產再平衡配置 (Year {current_year})")
-            st.markdown(f"""<div style="display: flex; align-items: center; background: #ECFDF5; padding: 15px; border-radius: 8px; color: #065F46; border: 1px solid #6EE7B7;"><span style="font-size: 1.2rem; font-weight: bold; margin-right: 10px;">目前總資產:</span><span style="font-size: 1.5rem; font-weight: 800;">${int(current_total):,}</span></div>""", unsafe_allow_html=True)
-            
-            # 🔥 修改處：計算浮點數預設值，完整複製當前比例
-            current_pcts = {}
-            for k in ASSET_KEYS:
-                if current_total > 0:
-                    # 使用小數點計算，不強制轉 int
-                    current_pcts[k] = (st.session_state.assets[k] / current_total) * 100
-                else:
-                    current_pcts[k] = 20.0
-            
-            st.write("請調整下方比例 (預設為當前資產比例)：")
-            
-            c1, c2, c3, c4, c5 = st.columns(5)
-            # 這裡的 input 改為 float 模式 (0.0 - 100.0)
-            rb1 = c1.number_input(f"{ASSET_NAMES['Dividend']}", 0.0, 100.0, current_pcts['Dividend'], step=1.0, format="%.1f", key=f"rb1_{current_year}")
-            rb2 = c2.number_input(f"{ASSET_NAMES['USBond']}", 0.0, 100.0, current_pcts['USBond'], step=1.0, format="%.1f", key=f"rb2_{current_year}")
-            rb3 = c3.number_input(f"{ASSET_NAMES['TWStock']}", 0.0, 100.0, current_pcts['TWStock'], step=1.0, format="%.1f", key=f"rb3_{current_year}")
-            rb4 = c4.number_input(f"{ASSET_NAMES['Cash']}", 0.0, 100.0, current_pcts['Cash'], step=1.0, format="%.1f", key=f"rb4_{current_year}")
-            rb5 = c5.number_input(f"{ASSET_NAMES['Crypto']}", 0.0, 100.0, current_pcts['Crypto'], step=1.0, format="%.1f", key=f"rb5_{current_year}")
-            
-            total_rb = rb1 + rb2 + rb3 + rb4 + rb5
-            # 浮點數比對，允許 0.01 的誤差
-            if abs(total_rb - 100.0) > 0.01: 
-                st.warning(f"⚠️ 比例總和錯誤: {total_rb:.1f}% (請手動調整至100%)")
-            else:
-                st.write("")
-                if st.button("執行配置 ✅", type="primary"):
-                    props = [rb1, rb2, rb3, rb4, rb5]
-                    st.session_state.config_history[f'Year {current_year}'] = {k: v for k, v in zip(ASSET_KEYS, props)}
-                    for i, key in enumerate(ASSET_KEYS):
-                        st.session_state.assets[key] = current_total * (props[i] / 100)
-                    last_rec = st.session_state.history[-1]
-                    last_rec.update(st.session_state.assets)
-                    st.session_state.waiting_for_rebalance = False
-                    st.rerun()
-
-# --- 3. 推進時間軸 ---
-    elif current_year < 30:
-        with st.container():
-            st.markdown(f"### ⏩ 推進時間軸: 第 {current_year+1} - {current_year+10} 年")
-            
-            # 定義過場變數
-            run_simulation = False
-            
-            # 按鈕區域佈局
-            if current_year == 0:
-                c_back, c_run = st.columns([1, 4])
-                with c_back:
-                    if st.button("⬅️ 返回重設"):
-                        st.session_state.stage = 'setup'
-                        st.session_state.history = [] 
-                        st.rerun()
-                with c_run:
-                    if st.button(f"🚀 啟動時光機 (前往第 {current_year+10} 年)", type="primary"):
-                        run_simulation = True
-            else:
-                if st.button(f"🚀 前往下一個十年 (Year {current_year+10})", type="primary"):
-                    run_simulation = True
-            
-            # --- ⏳ 轉場動畫與計算邏輯 ---
-            if run_simulation:
-                # 1. 建立一個佔位區塊，用來顯示過場動畫
-                transition_placeholder = st.empty()
-                
-                # 2. 決定過場圖片 (您可以準備 images/time_jump.png 或依年份區分)
-                if current_year == 0:
-                    jump_img = "images/wait1.png"   # 建議：火箭發射或起跑圖
-                    jump_text = "🚀 3, 2, 1... 投資旅程正式展開！"
-                elif current_year == 10:
-                    jump_img = "images/wait2.png"   # 建議：正在快速成長的城市或圖表
-                    jump_text = "📈 十年過去了，市場風雲變色..."
-                else:
-                    jump_img = "images/wait3.png"   # 建議：衝向終點線或金庫
-                    jump_text = "🏁 最後衝刺！迎向財富自由的終點！"
-                
-                # 3. 顯示過場畫面 (這會暫時覆蓋掉下方的內容)
-                with transition_placeholder.container():
-                    st.markdown("---")
-                    t_c1, t_c2, t_c3 = st.columns([1, 0.5, 1])
-                    with t_c2:
-                        st.markdown(f"<h2 style='text-align: center; color: #2563EB;'>{jump_text}</h2>", unsafe_allow_html=True)
-                        if os.path.exists(jump_img):
-                            st.image(jump_img, use_container_width=True)
-                        else:
-                            # 如果沒圖，顯示可愛的 Emoji 動畫
-                            st.markdown("""
-                                <div style='text-align: center; font-size: 80px; margin: 40px 0; animation: bounce 1s infinite;'>
-                                    ⏳ ➡️ 💰
-                                </div>
-                            """, unsafe_allow_html=True)
-                        
-                        # 顯示讀取條
-                        progress_text = "正在計算複利效應..."
-                        my_bar = st.progress(0, text=progress_text)
-                        
-                        for percent_complete in range(100):
-                            time.sleep(0.03) # 稍微控制一下進度條速度
-                            my_bar.progress(percent_complete + 1, text=progress_text)
-                    
-                    # 額外的停留時間，讓玩家看清楚圖片
-                    time.sleep(1.0) 
-
-                # 4. 執行數學計算 (後台)
-                for y in range(1, 11):
-                    st.session_state.assets['Dividend'] *= (1 + st.session_state.dynamic_rates['Dividend']) 
-                    st.session_state.assets['USBond']   *= (1 + st.session_state.dynamic_rates['USBond']) 
-                    st.session_state.assets['TWStock']  *= (1 + st.session_state.dynamic_rates['TWStock']) 
-                    st.session_state.assets['Cash']     *= (1 + st.session_state.dynamic_rates['Cash'])
-                    st.session_state.assets['Crypto']   *= (1 + st.session_state.dynamic_rates['Crypto']) 
-                    
-                    record = {'Year': current_year + y, 'Total': sum(st.session_state.assets.values())}
-                    record.update(st.session_state.assets)
-                    st.session_state.history.append(record)
-                
-                # 5. 更新狀態並重新整理
-                st.session_state.year += 10
-                st.session_state.waiting_for_event = True
-                
-                # 清除過場畫面 (其實 rerun 會自動清掉，但這樣寫比較保險)
-                transition_placeholder.empty()
-                st.rerun()
-
-    # 🔥 修改處：移除了這裡的圖表，只在第 0 年顯示初始配置
-    if len(st.session_state.history) > 0 and current_year == 0:
-        with st.container():
-            render_asset_snapshot(st.session_state.assets, title="📊 當前資產配置")
-
-# ==========================================
-# 階段 3: Finished
-# ==========================================
-elif st.session_state.stage == 'finished':
-    st.balloons()
-    final_wealth = sum(st.session_state.assets.values())
-    roi = (final_wealth - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
-    
- # --- 🏆 30年最終分級 (修正版) ---
-    # 邏輯：
-    # 1. 虧損 (ROI < 0): 遇到黑天鵝，直接破產。
-    # 2. 跑輸通膨 (0 < ROI < 150): 30年只賺不到1.5倍，其實購買力是下降的 (定存族)。
-    # 3. 普通人 (150 < ROI < 500): 合理的股市回報。
-    # 4. 高手 (500 < ROI < 1000): 有避開大跌，並吃到複利。
-    # 5. 傳奇 (> 1000): 運氣與實力兼具。
-
-    if roi < 0:
-        rank_title = "💸 破產俱樂部"
-        rank_desc = "黑天鵝來襲！波動性吃掉了你的本金..."
-        bg_gradient = "linear-gradient(135deg, #7f1d1d, #ef4444)" # 深紅警戒
-    elif roi < 200:
-        rank_title = "🐢 佛系定存族"
-        rank_desc = "這30年你只贏了帳面，卻輸給了真實通膨。"
-        bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
-    elif roi < 300:
-        rank_title = "🐢 佛系理財族"
-        rank_desc = "這30年只贏了通貨膨脹，接下來能追求財富倍增。"
-        bg_gradient = "linear-gradient(135deg, #4b5563, #9ca3af)" # 水泥灰
-    elif roi < 400:
-        rank_title = "💼 理財小白"
-        rank_desc = "表現穩健！開始有資產配置觀念。"
-        bg_gradient = "linear-gradient(135deg, #059669, #34d399)" # 穩健綠    
-    elif roi < 600:
-        rank_title = "💼 理財老手"
-        rank_desc = "表現穩健！這是大多數普通人退休目標。"
-        bg_gradient = "linear-gradient(135deg, #059669, #34d399)" # 穩健綠
-    elif roi < 800:
-        rank_title = "🚀 投資理財老鳥"
-        rank_desc = "眼光精準！你的資產成長速度驚人。"
-        bg_gradient = "linear-gradient(135deg, #7c3aed, #a78bfa)" # 尊爵紫    
-    elif roi < 1200:
-        rank_title = "🚀 自由財富號"
-        rank_desc = "眼光精準！你的資產成長速度驚人。"
-        bg_gradient = "linear-gradient(135deg, #7c3aed, #a78bfa)" # 尊爵紫
-    else:
-        rank_title = "👑 投資界的神"
-        rank_desc = "30年資產翻了10倍以上，巴菲特都要叫你老師！"
-        bg_gradient = "linear-gradient(135deg, #b45309, #fbbf24)" # 傳說金
-    
-
- # --- 📱 IG 限動截圖區 (置中顯示) ---
-    with st.container():
-        st.markdown("### 📸 IG 限動截圖區")
-        st.caption("👇 請直接對下方卡片進行螢幕截圖 (Screenshot)，即可分享至 IG 限時動態！")
-        
-        ig_c1, ig_c2, ig_c3 = st.columns([1, 2, 1])
-        
-        with ig_c2:
-            # ⚠️ 注意：這裡的 HTML 字串盡量靠左，不要有太多縮排，以免被誤判為程式碼區塊
-            st.markdown(f"""
-<div style="width: 100%; max-width: 380px; margin: 0 auto; background: {bg_gradient}; border-radius: 20px; padding: 30px 20px; color: white; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; border: 4px solid rgba(255,255,255,0.2); font-family: 'Inter', sans-serif;">
-    <div style="font-size: 14px; opacity: 0.4; letter-spacing: 2px; margin-bottom: 10px;">IFRC WEALTH SIMULATION</div>
-    <div style="background: rgba(255,255,255,0.15); border-radius: 50%; width: 80px; height: 80px; margin: 0 auto 15px auto; display: flex; align-items: center; justify-content: center; font-size: 40px; backdrop-filter: blur(5px);">
-        {rank_title.split(' ')[0]}
-    </div>
-    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px; text-shadow: none;">
-        {rank_title.split(' ')[1]}
-    </div>
-    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 25px; font-style: italic;">
-        “{rank_desc}”
-    </div>
-    <div style="background: rgba(255,255,255,0.95); border-radius: 12px; padding: 15px; color: #1F2937; margin-bottom: 15px;">
-        <div style="font-size: 12px; color: #6B7280; font-weight: 600;">最終資產 (30年)</div>
-        <div style="font-size: 32px; font-weight: 800; color: #111827; line-height: 1.2;">
-            ${int(final_wealth):,}
-        </div>
-    </div>
-    <div style="display: flex; justify-content: space-between; gap: 10px;">
-        <div style="flex: 1; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 10px;">
-            <div style="font-size: 11px; opacity: 0.8;">總報酬率</div>
-            <div style="font-size: 18px; font-weight: 700;">{roi:+.1f}%</div>
-        </div>
-        <div style="flex: 1; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 10px;">
-            <div style="font-size: 11px; opacity: 0.8;">玩家</div>
-            <div style="font-size: 18px; font-weight: 700;">{st.session_state.user_name}</div>
-        </div>
-    </div>
-    <div style="margin-top: 25px; font-size: 12px; opacity: 0.6; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 15px;">
-        扭轉命運 30 年 • IFRC Edition
-        <br>#InvestmentChallenge #IFRC
-    </div>
-</div>
-            """, unsafe_allow_html=True)
-    
-    # ... (以下接續原本的詳細數據分析代碼: c1, c2 = st.columns(2) ...)
-    # 記得要把原本 title 的部分 ("🏆 挑戰完成" 那塊) 稍微往下移或保留皆可，
-    # 但這個 IG 卡片最好放在最上面，因為玩家一結束最想看結果。
-
-    with st.container():
-        st.markdown(f"""<div style="text-align: center;"><h1 style="color: #F59E0B !important;">🏆 挑戰完成</h1><p style="font-size: 1.2rem;">恭喜玩家 <b>{st.session_state.user_name}</b> 完成 30 年投資模擬！</p></div>""", unsafe_allow_html=True)
-        c1, c2 = st.columns(2)
-        c1.markdown(f"""<div style="text-align: center; border: 1px solid #F59E0B; padding: 24px; background: #FFFBEB; border-radius: 12px;"><div style="color: #92400E; font-size: 14px; font-weight: 600;">最終資產總額</div><div style="color: #D97706; font-size: 36px; font-weight: 800; font-family: 'Inter';">${int(final_wealth):,}</div></div>""", unsafe_allow_html=True)
-        roi_color = '#EF4444' if roi < 0 else '#10B981'
-        bg_color = '#FEF2F2' if roi < 0 else '#ECFDF5'
-        border_color = '#FCA5A5' if roi < 0 else '#6EE7B7'
-        c2.markdown(f"""<div style="text-align: center; border: 1px solid {border_color}; padding: 24px; background: {bg_color}; border-radius: 12px;"><div style="color: #374151; font-size: 14px; font-weight: 600;">總累積報酬率</div><div style="color: {roi_color}; font-size: 36px; font-weight: 800; font-family: 'Inter';">{roi:.1f}%</div></div>""", unsafe_allow_html=True)
-        
-        # 🔥 新增：歷史配置策略回顧
-        if st.session_state.config_history:
-            st.markdown("---")
-            st.subheader("🎛️ 歷史配置策略回顧")
-            
-            # 將配置紀錄轉換為 DataFrame
-            df_config = pd.DataFrame(st.session_state.config_history).T # 轉置: 列是年份, 欄是資產
-            df_config = df_config.rename(columns=ASSET_NAMES) # 換成中文名稱
-            
-            # 準備畫圖用的數據 (Melt)
-            df_config_melt = df_config.reset_index().melt(id_vars='index', var_name='Asset', value_name='Percentage')
-            
-            c_chart, c_table = st.columns([2, 1])
-            
-            with c_chart:
-                fig_alloc = px.bar(
-                    df_config_melt, 
-                    x='index', 
-                    y='Percentage', 
-                    color='Asset', 
-                    color_discrete_map=FINANCE_COLORS,
-                    title="配置比例變化圖",
-                    labels={'index': '年份', 'Percentage': '配置比例 (%)'}
-                )
-                fig_alloc.update_layout(
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#000000"),
-                    margin=dict(t=30, b=0, l=0, r=0)
-                )
-                st.plotly_chart(fig_alloc, use_container_width=True, theme=None)
-                
-            with c_table:
-                st.write("詳細配置數據 (%)")
-                st.dataframe(df_config.style.format("{:.1f}%"), use_container_width=True) # 修改為顯示小數點
-
-        # 🔥 修改處：結算頁面顯示最終資產快照 (Pie + Table)
-        st.markdown("---")
-        render_asset_snapshot(st.session_state.assets, title="📊 最終資產分佈")
-
-        # 🔥 修改處：結算頁面顯示資產成長趨勢圖 (Area Chart)
-        st.markdown("---")
-        st.subheader("📈 30年資產成長回顧")
-        df = pd.DataFrame(st.session_state.history)
-        df_melted = df.melt(id_vars=['Year', 'Total'], value_vars=list(ASSET_KEYS), var_name='Asset_Type', value_name='Value')
-        df_melted['Asset_Name'] = df_melted['Asset_Type'].map(ASSET_NAMES)
-        
-        fig = px.area(df_melted, x="Year", y="Value", color="Asset_Name", color_discrete_map=FINANCE_COLORS, template="plotly_white")
-        fig.update_layout(
-            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
-            margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            xaxis=dict(title="年份", showgrid=False, tickmode='linear'), yaxis=dict(title="資產價值 ($)", showgrid=True, gridcolor='#F3F4F6', tickformat=".2s"),
-            font=dict(color="#060606")
-        )
-        st.plotly_chart(fig, use_container_width=True, theme=None)
-
-        st.markdown("---")
-        st.subheader("🎴 命運歷程回顧")
-        
-        if len(st.session_state.drawn_cards) > 0:
-            for card_info in st.session_state.drawn_cards:
-                st.markdown(f"""
-                <div style="background: white; border-left: 4px solid #F59E0B; padding: 16px; margin-bottom: 12px; border-radius: 0 8px 8px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-                    {card_info}
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("本次模擬無重大事件發生。")
-
-        st.markdown("---")
-        st.subheader("📝 心得與反饋")
-        feedback = st.text_area("請留下您的遊戲心得")
-        if st.button("💾 儲存並結束", type="primary"):
-            if not st.session_state.data_saved:
-                save_data_to_csv(st.session_state.user_name, final_wealth, roi, st.session_state.drawn_cards, st.session_state.config_history, feedback)
-                st.session_state.data_saved = True
-                st.success("✅ 數據已成功上傳。")
-                import time
-                time.sleep(1) 
-                st.rerun()    
-
-    if st.button("🔄 開啟新挑戰"):
-        for key in st.session_state.keys(): del st.session_state[key]
-        st.rerun()
-# ------------------------------------------------
-# 🦶 頁尾 Footer (放在程式碼最後面，縮排最外層)
-# ------------------------------------------------
-st.markdown("""
-    <div style="
-        text-align: center; 
-        margin-top: 60px; 
-        padding-bottom: 30px; 
-        color: #D1D5DB; /* 淺灰色 */
-        font-size: 13px; 
-        font-weight: 600;
-        font-family: 'Inter', sans-serif;
-        letter-spacing: 2px;
-        opacity: 0.8;
-    ">
-        IFRC <span style="color: #F59E0B;">x</span> TS
-    </div>
-""", unsafe_allow_html=True)       
+if __name__ == "__main__":
+    app.run()
