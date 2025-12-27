@@ -961,16 +961,14 @@ elif st.session_state.stage == 'finished':
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 # ------------------------------------------------
-# 🦶 頁尾 Footer
+# 🦶 頁尾 Footer (放在程式碼最後面，縮排最外層)
 # ------------------------------------------------
-active_count = get_active_user_count() # 獲取人數
-
-st.markdown(f"""
+st.markdown("""
     <div style="
         text-align: center; 
         margin-top: 60px; 
         padding-bottom: 30px; 
-        color: #D1D5DB; 
+        color: #D1D5DB; /* 淺灰色 */
         font-size: 13px; 
         font-weight: 600;
         font-family: 'Inter', sans-serif;
@@ -978,8 +976,5 @@ st.markdown(f"""
         opacity: 0.8;
     ">
         IFRC <span style="color: #F59E0B;">x</span> TS
-        <div style="margin-top: 8px; font-size: 11px; color: #6B7280; font-weight: 400; opacity: 0.6;">
-            🟢 {active_count} players online
-        </div>
     </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True)       
