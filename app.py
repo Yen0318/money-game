@@ -7,7 +7,18 @@ import time
 from datetime import datetime
 import plotly.express as px
 import streamlit.components.v1 as components
-
+# --- 0. 輔助函數：獲取在線人數 ---
+def get_active_user_count():
+    try:
+        from streamlit.runtime import get_instance
+        runtime = get_instance()
+        if runtime:
+            session_manager = runtime._session_manager
+            sessions = session_manager.list_active_sessions()
+            return len(sessions)
+    except Exception:
+        return 1 # 如果無法讀取 (例如本地端開發或版本差異)，預設回傳 1
+    return 1
 # --- 1. 頁面設定 (必須放在所有 Streamlit 指令的第一行) ---
 st.set_page_config(page_title="Flip Your Destiny - IFRC Edition", page_icon="🏦", layout="wide")
 
@@ -338,6 +349,9 @@ with st.sidebar:
 
         # --- 3. 即時戰況與數據導出 ---
         with st.expander("📊 現場數據監控", expanded=True):
+            active_users = get_active_user_count()
+            st.metric("🟢 目前同時在線人數", f"{active_users} 人")
+            st.markdown("---")            
             if os.path.exists(CSV_FILE):
                 df_rec = pd.read_csv(CSV_FILE)
                 st.write(f"目前累積完賽人數: `{len(df_rec)}`")
@@ -947,14 +961,16 @@ elif st.session_state.stage == 'finished':
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 # ------------------------------------------------
-# 🦶 頁尾 Footer (放在程式碼最後面，縮排最外層)
+# 🦶 頁尾 Footer
 # ------------------------------------------------
-st.markdown("""
+active_count = get_active_user_count() # 獲取人數
+
+st.markdown(f"""
     <div style="
         text-align: center; 
         margin-top: 60px; 
         padding-bottom: 30px; 
-        color: #D1D5DB; /* 淺灰色 */
+        color: #D1D5DB; 
         font-size: 13px; 
         font-weight: 600;
         font-family: 'Inter', sans-serif;
@@ -962,5 +978,8 @@ st.markdown("""
         opacity: 0.8;
     ">
         IFRC <span style="color: #F59E0B;">x</span> TS
+        <div style="margin-top: 8px; font-size: 11px; color: #6B7280; font-weight: 400; opacity: 0.6;">
+            🟢 {active_count} players online
+        </div>
     </div>
-""", unsafe_allow_html=True)       
+""", unsafe_allow_html=True)
