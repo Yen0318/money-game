@@ -548,11 +548,11 @@ elif st.session_state.stage == 'playing':
 
     current_year = st.session_state.year
     
-    st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
     
 # --- 1. 抽卡事件 ---
     if st.session_state.get('waiting_for_event', False):
         with st.container():
+            st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
             
             render_asset_snapshot(st.session_state.assets, title="📊 當前資產快照")
             st.markdown("---")
