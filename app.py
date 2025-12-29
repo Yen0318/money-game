@@ -552,87 +552,122 @@ elif st.session_state.stage == 'playing':
 # --- 1. 抽卡事件 ---
     if st.session_state.get('waiting_for_event', False):
         with st.container():
-            st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
-            
-            render_asset_snapshot(st.session_state.assets, title="📊 當前資產快照")
-            st.markdown("---")
-            st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 命運扭蛋 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
-            
-            # 卡片封面與輸入邏輯
-            current_input = st.session_state.get("event_card_input", "")
-            temp_code = str(current_input).strip()
-            
-            if temp_code not in EVENT_CARDS:
-                cover_img = "images/homepage.png"
-                cover_c1, cover_c2, cover_c3 = st.columns([1, 1, 1])
-                with cover_c2:
-                    if os.path.exists(cover_img):
-                        st.image(cover_img, use_container_width=True, caption="請輸入卡片代碼翻開命運...")
-                    else:
-                        st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
-            
-            col_input, col_status = st.columns([2, 1])
-            input_code = col_input.text_input(
-                "請在此輸入卡片代碼 (3碼)",
-                placeholder="例如: 101", 
-                help="請查看您抽到的實體卡片，輸入上面的3位數編號",
-                key="event_card_input"
-            )
-            clean_code = str(input_code).strip()
-            
-            if clean_code in EVENT_CARDS:
-                card_data = EVENT_CARDS[clean_code]
-                image_path = f"images/{clean_code}.png"
-                
-                col_img, col_desc = st.columns([1, 2])
-                with col_img:
-                    if os.path.exists(image_path): st.image(image_path, use_container_width=True)
-                    else: st.info("📷 No Image")
-                with col_desc:
-                    st.markdown(f"""<div style="background: #F0F9FF; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; height: 100%;"><h3 style="margin-top: 0; color: #1E40AF !important;">{card_data['name']}</h3><p style="font-size: 1.1rem; color: #374151;">{card_data['desc']}</p></div>""", unsafe_allow_html=True)
-                
-                st.write("")
-                st.write("#### 📊 市場衝擊預覽 (預估損益)")
-                cols = st.columns(5)
-                key_map = {'dividend': 'Dividend', 'bond': 'USBond', 'stock': 'TWStock', 'cash': 'Cash', 'crypto': 'Crypto'}
-                metrics = [('分紅收益', 'dividend'), ('美債', 'bond'), ('台股', 'stock'), ('現金', 'cash'), ('加密幣', 'crypto')]
-                
-                for i, (name, card_key) in enumerate(metrics):
-                    asset_key = key_map[card_key]
-                    pct_change = card_data[card_key]
-                    current_val = st.session_state.assets[asset_key] # 取得當前資產
-                    impact_val = current_val * (pct_change / 100)
-                    
-                    color = '#EF4444' if pct_change < 0 else ('#10B981' if pct_change > 0 else '#6B7280')
-                    arrow = '▼' if pct_change < 0 else ('▲' if pct_change > 0 else '-')
-                    sign = '' if pct_change < 0 else ('+' if pct_change > 0 else '')
-                    bg_color = '#FEF2F2' if pct_change < 0 else '#ECFDF5'
-                    
-                    # 🔥 修改處：增加顯示「當前」資產數值
-                    cols[i].markdown(f"""
-                    <div style="text-align: center; background: #fff; padding: 12px 5px; border-radius: 8px; border: 1px solid #E5E7EB; height: 100%;">
-                        <div style="color: #6B7280; font-size: 13px; margin-bottom: 2px;">{name}</div>
-                        <div style="color: #1F2937; font-size: 14px; font-weight: 600; border-bottom: 1px dashed #E5E7EB; padding-bottom: 4px; margin-bottom: 4px;">現: ${int(current_val):,}</div>
-                        <div style="color: {color}; font-size: 18px; font-weight: bold; line-height: 1.2;">{arrow} {abs(pct_change)}%</div>
-                        <div style="color: {color}; font-size: 13px; font-weight: 600; margin-top: 4px; background-color: {bg_color}; padding: 2px 4px; border-radius: 4px;">{sign}${int(impact_val):,}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+            # 1. 初始化局部狀態：是否已進入「輸入卡片代碼」階段
+            # False = 還在看資產 (步驟一)
+            # True  = 正在抽卡 (步驟二)
+            if 'show_card_input' not in st.session_state:
+                st.session_state.show_card_input = False
 
+            # ==========================================
+            # 🟢 步驟一：暴風雨前的寧靜 (只顯示資產)
+            # ==========================================
+            if not st.session_state.show_card_input:
+                st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2>🔔 第 {current_year} 年：資產檢視</h2></div>""", unsafe_allow_html=True)
+                
+                # 這裡顯示資產快照 (依您的需求，這時候才顯示)
+                render_asset_snapshot(st.session_state.assets, title="📊 請確認您的資產 (衝擊前)")
+                
                 st.write("")
-                if st.button("迎接命運衝擊 📉", type="primary"):
-                    st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
-                    st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
-                    st.session_state.assets['TWStock']  *= (1 + card_data['stock']/100)
-                    st.session_state.assets['Cash']     *= (1 + card_data['cash']/100)
-                    st.session_state.assets['Crypto']   *= (1 + card_data['crypto']/100)
-                    st.session_state.drawn_cards.append(f"第 {current_year} 年: [{clean_code}] {card_data['name']}")
-                    last_rec = st.session_state.history[-1]
-                    last_rec.update(st.session_state.assets)
-                    last_rec['Total'] = sum(st.session_state.assets.values())
-                    st.session_state.waiting_for_event = False
-                    if current_year >= 30: st.session_state.stage = 'finished'
-                    else: st.session_state.waiting_for_rebalance = True
-                    st.rerun()
+                st.write("")
+                
+                # 下一步按鈕區域
+                c_next1, c_next2, c_next3 = st.columns([1, 2, 1])
+                with c_next2:
+                    st.markdown("<div style='text-align: center; color: #6B7280; margin-bottom: 10px; font-size: 14px;'>確認目前資產無誤後，請進入命運環節...</div>", unsafe_allow_html=True)
+                    # 按下按鈕後，切換狀態並重新整理頁面
+                    if st.button("下一步：抽取命運卡 🎴", type="primary"):
+                        st.session_state.show_card_input = True
+                        st.rerun()
+
+            # ==========================================
+            # 🔴 步驟二：輸入代碼與結算 (隱藏資產快照)
+            # ==========================================
+            else:
+                st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
+                
+                # 卡片封面與輸入邏輯
+                current_input = st.session_state.get("event_card_input", "")
+                temp_code = str(current_input).strip()
+                
+                if temp_code not in EVENT_CARDS:
+                    cover_img = "images/homepage.png"
+                    cover_c1, cover_c2, cover_c3 = st.columns([1, 1, 1])
+                    with cover_c2:
+                        if os.path.exists(cover_img):
+                            st.image(cover_img, use_container_width=True, caption="請輸入卡片代碼翻開命運...")
+                        else:
+                            st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
+                
+                col_input, col_status = st.columns([2, 1])
+                input_code = col_input.text_input(
+                    "請在此輸入卡片代碼 (3碼)",
+                    placeholder="例如: 101", 
+                    help="請查看您抽到的實體卡片，輸入上面的3位數編號",
+                    key="event_card_input"
+                )
+                clean_code = str(input_code).strip()
+                
+                if clean_code in EVENT_CARDS:
+                    card_data = EVENT_CARDS[clean_code]
+                    image_path = f"images/{clean_code}.png"
+                    
+                    col_img, col_desc = st.columns([1, 2])
+                    with col_img:
+                        if os.path.exists(image_path): st.image(image_path, use_container_width=True)
+                        else: st.info("📷 No Image")
+                    with col_desc:
+                        st.markdown(f"""<div style="background: #F0F9FF; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; height: 100%;"><h3 style="margin-top: 0; color: #1E40AF !important;">{card_data['name']}</h3><p style="font-size: 1.1rem; color: #374151;">{card_data['desc']}</p></div>""", unsafe_allow_html=True)
+                    
+                    st.write("")
+                    st.write("#### 📊 市場衝擊預覽 (預估損益)")
+                    cols = st.columns(5)
+                    key_map = {'dividend': 'Dividend', 'bond': 'USBond', 'stock': 'TWStock', 'cash': 'Cash', 'crypto': 'Crypto'}
+                    metrics = [('分紅收益', 'dividend'), ('美債', 'bond'), ('台股', 'stock'), ('現金', 'cash'), ('加密幣', 'crypto')]
+                    
+                    for i, (name, card_key) in enumerate(metrics):
+                        asset_key = key_map[card_key]
+                        pct_change = card_data[card_key]
+                        current_val = st.session_state.assets[asset_key]
+                        impact_val = current_val * (pct_change / 100)
+                        
+                        color = '#EF4444' if pct_change < 0 else ('#10B981' if pct_change > 0 else '#6B7280')
+                        arrow = '▼' if pct_change < 0 else ('▲' if pct_change > 0 else '-')
+                        sign = '' if pct_change < 0 else ('+' if pct_change > 0 else '')
+                        bg_color = '#FEF2F2' if pct_change < 0 else '#ECFDF5'
+                        
+                        # 這裡保留了「顯示當前資產」的設計
+                        cols[i].markdown(f"""
+                        <div style="text-align: center; background: #fff; padding: 12px 5px; border-radius: 8px; border: 1px solid #E5E7EB; height: 100%;">
+                            <div style="color: #6B7280; font-size: 13px; margin-bottom: 2px;">{name}</div>
+                            <div style="color: #1F2937; font-size: 14px; font-weight: 600; border-bottom: 1px dashed #E5E7EB; padding-bottom: 4px; margin-bottom: 4px;">現: ${int(current_val):,}</div>
+                            <div style="color: {color}; font-size: 18px; font-weight: bold; line-height: 1.2;">{arrow} {abs(pct_change)}%</div>
+                            <div style="color: {color}; font-size: 13px; font-weight: 600; margin-top: 4px; background-color: {bg_color}; padding: 2px 4px; border-radius: 4px;">{sign}${int(impact_val):,}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    st.write("")
+                    if st.button("迎接命運衝擊 📉", type="primary"):
+                        st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
+                        st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
+                        st.session_state.assets['TWStock']  *= (1 + card_data['stock']/100)
+                        st.session_state.assets['Cash']     *= (1 + card_data['cash']/100)
+                        st.session_state.assets['Crypto']   *= (1 + card_data['crypto']/100)
+                        
+                        st.session_state.drawn_cards.append(f"第 {current_year} 年: [{clean_code}] {card_data['name']}")
+                        
+                        last_rec = st.session_state.history[-1]
+                        last_rec.update(st.session_state.assets)
+                        last_rec['Total'] = sum(st.session_state.assets.values())
+                        
+                        st.session_state.waiting_for_event = False
+                        
+                        # 🔥 關鍵：重置這個步驟變數，確保下一個十年(例如第20年)進來時，
+                        # 又會從「資產檢視」開始，而不是直接跳到抽卡
+                        st.session_state.show_card_input = False 
+                        
+                        if current_year >= 30: st.session_state.stage = 'finished'
+                        else: st.session_state.waiting_for_rebalance = True
+                        st.rerun()
 
     # --- 2. 再平衡階段 ---
     elif st.session_state.get('waiting_for_rebalance', False):
@@ -685,14 +720,18 @@ elif st.session_state.stage == 'playing':
         with st.container():
             st.markdown(f"### ⏩ 推進時間軸: 第 {current_year+1} - {current_year+10} 年")
             
-            # 🔥 修改處：如果是第0年，把「資產配置快照」搬到這裡顯示
+            # 🔥 修改處 1：建立一個專門放「資產快照」的佔位符
+            snapshot_placeholder = st.empty()
+            
+            # 將內容放進佔位符中
             if current_year == 0:
-                render_asset_snapshot(st.session_state.assets, title="📊 第 0 年初始配置確認")
-                st.write("") # 加一點留白
+                with snapshot_placeholder.container():
+                    render_asset_snapshot(st.session_state.assets, title="📊 第 0 年初始配置確認")
+                    st.write("") 
 
             run_simulation = False
             
-            # 🔥 修改處：建立一個 Placeholder 來包住按鈕，按下後可以把它清空
+            # 建立一個 Placeholder 來包住按鈕
             action_placeholder = st.empty()
             
             with action_placeholder.container():
@@ -713,8 +752,9 @@ elif st.session_state.stage == 'playing':
             
             # --- ⏳ 轉場動畫與計算邏輯 ---
             if run_simulation:
-                # 🔥 修改處：立刻把上面的按鈕區塊清空，讓按鈕消失
+                # 🔥 修改處 2：動畫開始時，清空「按鈕」與「資產快照」，只留標題
                 action_placeholder.empty()
+                snapshot_placeholder.empty() # 這行會把上面的圓餅圖變不見
 
                 # 1. 建立一個佔位區塊，用來顯示全螢幕過場動畫
                 transition_placeholder = st.empty()
@@ -733,11 +773,11 @@ elif st.session_state.stage == 'playing':
                 # 3. 顯示過場畫面
                 with transition_placeholder.container():
                     st.markdown("---")
-                    t_c1, t_c2, t_c3 = st.columns([1, 2, 1])
+                    t_c1, t_c2, t_c3 = st.columns([1, 0.5, 1])
                     with t_c2:
                         st.markdown(f"<h2 style='text-align: center; color: #2563EB;'>{jump_text}</h2>", unsafe_allow_html=True)
                         
-                        # 🔥 修改處：進度條 (Progress Bar) 移到 圖片 (Image) 上面
+                        # 進度條 (Progress Bar) 顯示在圖片上方
                         progress_text = "正在計算複利效應..."
                         my_bar = st.progress(0, text=progress_text)
                         
@@ -770,7 +810,6 @@ elif st.session_state.stage == 'playing':
                 
                 transition_placeholder.empty()
                 st.rerun()
-
     # 🔥 記得移除原本放在最下面的 render_asset_snapshot 呼叫（因為已經搬到上面了）
     # if len(st.session_state.history) > 0 and current_year == 0: ... (這段請刪除或確保不會重複出現)
 
