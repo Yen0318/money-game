@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 import plotly.express as px
 import streamlit.components.v1 as components
+import random # <--- 新增這行
 # --- 0. 輔助函數：獲取在線人數 ---
 def get_active_user_count():
     try:
@@ -412,14 +413,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 階段 0: 登入
+# 階段 0: 登入與模式選擇 (Login & Mode Selection)
 # ==========================================
 if st.session_state.stage == 'login':
     with st.container():
         st.markdown("<div style='text-align: center; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
         
-        img_c1, img_c2, img_c3 = st.columns([1, 1, 1])
-        with img_c2:
+        # 圖片區塊維持原樣
+        _, img_c, _ = st.columns([1, 1, 1]) # 使用 _ 省略變數
+        with img_c:
             image_path = "images/homepage.png"
             if os.path.exists(image_path):
                 st.image(image_path, use_container_width=True) 
@@ -428,32 +430,53 @@ if st.session_state.stage == 'login':
 
         st.markdown("<div style='text-align: center; color: #6B7280; font-size: 0.9rem; margin-bottom: 20px;'>扭轉命運的機會就在眼前，準備好了嗎？</div>", unsafe_allow_html=True)
         
-        input_c1, input_c2, input_c3 = st.columns([1, 2, 1])
-        with input_c2:
+        # 暱稱輸入區塊維持原樣
+        _, input_c, _ = st.columns([1, 2, 1])
+        with input_c:
             name_input = st.text_input("請輸入玩家暱稱", placeholder="例如: 小明", key="login_name")
             st.write("")
-            if st.button("▶ 開始挑戰", type="primary"):
+        
+        # --- 🔥 修改處：優化寬螢幕版面 (使用佔位欄位置中) ---
+        st.markdown("<h5 style='text-align: center;'>選擇您的挑戰模式：</h5>", unsafe_allow_html=True)
+        
+        # 使用 [1, 1.5, 1.5, 1] 比例：左右兩邊是空白，中間兩個放按鈕
+        space_l, col_mode_1, col_mode_2, space_r = st.columns([1, 1.5, 1.5, 1])
+        
+        with col_mode_1:
+            st.markdown("""
+            <div style="text-align: center; margin-bottom: 10px; color: #4B5563; font-size: 0.85rem; height: 40px;">
+                🎴 <b>派對版</b><br><span style="font-size: 0.75rem; color: #9CA3AF;">(需輸入實體卡號)</span>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("多人派對模式 👥", type="primary", key="btn_party"):
                 if name_input.strip():
                     st.session_state.user_name = name_input
+                    st.session_state.game_mode = 'party'
                     st.session_state.stage = 'setup'
                     st.session_state.data_saved = False
                     st.rerun()
                 else:
-                    st.warning("⚠️ 請輸入暱稱以開始遊戲")
+                    st.warning("⚠️ 請輸入暱稱")
 
-        # 👇 在登入按鈕下方加入這段
-        st.markdown("---")
-        st.markdown("""
-        <div style="text-align: center; color: #9CA3AF; font-size: 13px; margin-top: 20px;">
-            <div style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">製作團隊IFRCxTS</div>
-                🔹 <b>總策劃：</b>Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
-                🔹 <b>技術支援：</b> Yen <br> 
-                🔹 <b>美術支援：</b> Liya <br>    
-                🔹 <b>遊戲設計：</b> 天行 & IFRC<br>
+        with col_mode_2:
+            st.markdown("""
+            <div style="text-align: center; margin-bottom: 10px; color: #4B5563; font-size: 0.85rem; height: 40px;">
+                🎲 <b>獨享版</b><br><span style="font-size: 0.75rem; color: #9CA3AF;">(系統隨機抽卡)</span>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+            if st.button("單人獨享模式 👤", key="btn_solo"):
+                if name_input.strip():
+                    st.session_state.user_name = name_input
+                    st.session_state.game_mode = 'solo'
+                    st.session_state.stage = 'setup'
+                    st.session_state.data_saved = False
+                    st.rerun()
+                else:
+                    st.warning("⚠️ 請輸入暱稱")
+        
+        # Footer 維持原樣...
+        st.markdown("---")
+
 # ==========================================
 # 階段 1: Setup
 # ==========================================
@@ -538,16 +561,20 @@ elif st.session_state.stage == 'playing':
     total = sum(st.session_state.assets.values())
     roi = (total - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
     
-    with st.container():
-        c_year, c_wealth, c_roi = st.columns(3)
-        c_year.metric("目前年份", f"第 {st.session_state.year} 年", delta=f"剩餘 {30-st.session_state.year} 年", delta_color="off")
-        c_wealth.metric("總資產", f"${int(total):,}")
-        c_roi.metric("累積報酬率", f"{roi:.1f}%", delta_color="normal")
-        st.write("")
-        st.progress(st.session_state.year / 30)
+    # 🔥 修改處 1：建立一個儀表板的佔位符，把 Metric 都包進去
+    metrics_placeholder = st.empty()
+    
+    with metrics_placeholder.container():
+        # 這裡包著原本的儀表板代碼
+        with st.container():
+            c_year, c_wealth, c_roi = st.columns(3)
+            c_year.metric("目前年份", f"第 {st.session_state.year} 年", delta=f"剩餘 {30-st.session_state.year} 年", delta_color="off")
+            c_wealth.metric("總資產", f"${int(total):,}")
+            c_roi.metric("累積報酬率", f"{roi:.1f}%", delta_color="normal")
+            st.write("")
+            st.progress(st.session_state.year / 30)
 
     current_year = st.session_state.year
-    
     
 # --- 1. 抽卡事件 ---
     if st.session_state.get('waiting_for_event', False):
@@ -579,47 +606,80 @@ elif st.session_state.stage == 'playing':
                         st.session_state.show_card_input = True
                         st.rerun()
 
-            # ==========================================
-            # 🔴 步驟二：輸入代碼與結算 (隱藏資產快照)
+# ==========================================
+            # 🔴 步驟二：輸入代碼與結算
             # ==========================================
             else:
                 st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2 style="color: #EF4444 !important;">⚡ 重大財經事件發生 (Year {current_year})</h2></div>""", unsafe_allow_html=True)
                 
-                # 卡片封面與輸入邏輯
-                current_input = st.session_state.get("event_card_input", "")
-                temp_code = str(current_input).strip()
+                # 確保變數存在
+                if "event_card_input" not in st.session_state:
+                    st.session_state.event_card_input = ""
                 
-                if temp_code not in EVENT_CARDS:
-                    cover_img = "images/homepage.png"
-                    cover_c1, cover_c2, cover_c3 = st.columns([1, 1, 1])
-                    with cover_c2:
+                # 取得當前代碼 (如果有)
+                current_input = st.session_state.get("event_card_input", "")
+                clean_code = str(current_input).strip()
+                
+                # ----------------------------------------------------
+                # 情況 A: 尚未抽卡 (Clean Code 為空) -> 顯示背面圖 + 操作區
+                # ----------------------------------------------------
+                if clean_code not in EVENT_CARDS:
+                    # 1. 先顯示背面圖片 (置中)
+                    _, cover_c, _ = st.columns([1, 1, 1])
+                    with cover_c:
+                        cover_img = "images/homepage.png"
                         if os.path.exists(cover_img):
-                            st.image(cover_img, use_container_width=True, caption="請輸入卡片代碼翻開命運...")
+                            st.image(cover_img, use_container_width=True)
                         else:
                             st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
-                
-                col_input, col_status = st.columns([2, 1])
-                input_code = col_input.text_input(
-                    "請在此輸入卡片代碼 (3碼)",
-                    placeholder="例如: 101", 
-                    help="請查看您抽到的實體卡片，輸入上面的3位數編號",
-                    key="event_card_input"
-                )
-                clean_code = str(input_code).strip()
-                
-                if clean_code in EVENT_CARDS:
+                    
+                    st.write("") # 增加一點間距
+
+                    # 2. 🔥 修改處：在圖片「下方」根據模式顯示對應操作元件
+                    
+                    # === 模式 A: 派對版 (顯示輸入框) ===
+                    if st.session_state.get('game_mode', 'party') == 'party':
+                        _, input_c, _ = st.columns([1, 2, 1]) # 置中縮窄
+                        with input_c:
+                            input_val = st.text_input(
+                                "請輸入實體卡片代碼 (3碼)",
+                                placeholder="例如: 101", 
+                                key="event_card_input_widget"
+                            )
+                            if input_val:
+                                st.session_state.event_card_input = input_val
+                                st.rerun() # 輸入後立即重整以顯示結果
+
+                    # === 模式 B: 獨享版 (顯示抽卡按鈕) ===
+                    else:
+                        st.markdown("<div style='text-align: center; color: #6B7280; margin-bottom: 10px;'>🔮 命運掌握在機率手中...</div>", unsafe_allow_html=True)
+                        _, btn_c, _ = st.columns([1, 2, 1]) # 置中縮窄
+                        with btn_c:
+                            if st.button("✨ 點擊感應命運 (隨機抽卡)", type="primary", use_container_width=True):
+                                import random
+                                random_card = random.choice(list(EVENT_CARDS.keys()))
+                                st.session_state.event_card_input = random_card
+                                st.rerun()
+
+                # ----------------------------------------------------
+                # 情況 B: 已有卡片代碼 -> 顯示結果與結算
+                # ----------------------------------------------------
+                else:
                     card_data = EVENT_CARDS[clean_code]
                     image_path = f"images/{clean_code}.png"
                     
+                    # 顯示卡片結果區 (維持原樣)
                     col_img, col_desc = st.columns([1, 2])
                     with col_img:
                         if os.path.exists(image_path): st.image(image_path, use_container_width=True)
-                        else: st.info("📷 No Image")
+                        else: st.info(f"Card: {clean_code}")
                     with col_desc:
                         st.markdown(f"""<div style="background: #F0F9FF; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; height: 100%;"><h3 style="margin-top: 0; color: #1E40AF !important;">{card_data['name']}</h3><p style="font-size: 1.1rem; color: #374151;">{card_data['desc']}</p></div>""", unsafe_allow_html=True)
                     
                     st.write("")
                     st.write("#### 📊 市場衝擊預覽 (預估損益)")
+                    
+                    # 顯示損益方塊 (維持原樣)
                     cols = st.columns(5)
                     key_map = {'dividend': 'Dividend', 'bond': 'USBond', 'stock': 'TWStock', 'cash': 'Cash', 'crypto': 'Crypto'}
                     metrics = [('分紅收益', 'dividend'), ('美債', 'bond'), ('台股', 'stock'), ('現金', 'cash'), ('加密幣', 'crypto')]
@@ -635,7 +695,6 @@ elif st.session_state.stage == 'playing':
                         sign = '' if pct_change < 0 else ('+' if pct_change > 0 else '')
                         bg_color = '#FEF2F2' if pct_change < 0 else '#ECFDF5'
                         
-                        # 這裡保留了「顯示當前資產」的設計
                         cols[i].markdown(f"""
                         <div style="text-align: center; background: #fff; padding: 12px 5px; border-radius: 8px; border: 1px solid #E5E7EB; height: 100%;">
                             <div style="color: #6B7280; font-size: 13px; margin-bottom: 2px;">{name}</div>
@@ -646,6 +705,7 @@ elif st.session_state.stage == 'playing':
                         """, unsafe_allow_html=True)
 
                     st.write("")
+                    # 結算按鈕 (維持原樣)
                     if st.button("迎接命運衝擊 📉", type="primary"):
                         st.session_state.assets['Dividend'] *= (1 + card_data['dividend']/100)
                         st.session_state.assets['USBond']   *= (1 + card_data['bond']/100)
@@ -660,10 +720,8 @@ elif st.session_state.stage == 'playing':
                         last_rec['Total'] = sum(st.session_state.assets.values())
                         
                         st.session_state.waiting_for_event = False
-                        
-                        # 🔥 關鍵：重置這個步驟變數，確保下一個十年(例如第20年)進來時，
-                        # 又會從「資產檢視」開始，而不是直接跳到抽卡
                         st.session_state.show_card_input = False 
+                        st.session_state.event_card_input = "" 
                         
                         if current_year >= 30: st.session_state.stage = 'finished'
                         else: st.session_state.waiting_for_rebalance = True
@@ -752,12 +810,15 @@ elif st.session_state.stage == 'playing':
             
             # --- ⏳ 轉場動畫與計算邏輯 ---
             if run_simulation:
-                # 🔥 修改處 2：動畫開始時，清空「按鈕」與「資產快照」，只留標題
+                # 🔥 修改處 2：加入 metrics_placeholder.empty()
+                # 這樣動畫開始時，最上面的年份跟資產也會一起消失
+                metrics_placeholder.empty() 
                 action_placeholder.empty()
-                snapshot_placeholder.empty() # 這行會把上面的圓餅圖變不見
+                snapshot_placeholder.empty() 
 
                 # 1. 建立一個佔位區塊，用來顯示全螢幕過場動畫
                 transition_placeholder = st.empty()
+                
                 
                 # 2. 決定過場圖片
                 if current_year == 0:
