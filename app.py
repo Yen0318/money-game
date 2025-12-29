@@ -419,8 +419,8 @@ if st.session_state.stage == 'login':
     with st.container():
         st.markdown("<div style='text-align: center; margin-bottom: 5px;'></div>", unsafe_allow_html=True)
         
-        # 圖片區塊維持原樣
-        _, img_c, _ = st.columns([1, 1, 1]) # 使用 _ 省略變數
+        # 圖片區塊 (保持置中)
+        _, img_c, _ = st.columns([1, 1, 1])
         with img_c:
             image_path = "images/homepage.png"
             if os.path.exists(image_path):
@@ -430,52 +430,79 @@ if st.session_state.stage == 'login':
 
         st.markdown("<div style='text-align: center; color: #6B7280; font-size: 0.9rem; margin-bottom: 20px;'>扭轉命運的機會就在眼前，準備好了嗎？</div>", unsafe_allow_html=True)
         
-        # 暱稱輸入區塊維持原樣
+        # 暱稱輸入區塊 (保持置中)
         _, input_c, _ = st.columns([1, 2, 1])
         with input_c:
             name_input = st.text_input("請輸入玩家暱稱", placeholder="例如: 小明", key="login_name")
             st.write("")
         
-        # --- 🔥 修改處：優化寬螢幕版面 (使用佔位欄位置中) ---
-        st.markdown("<h5 style='text-align: center;'>選擇您的挑戰模式：</h5>", unsafe_allow_html=True)
+        st.markdown("<h5 style='text-align: center; color: #374151;'>選擇您的挑戰模式</h5>", unsafe_allow_html=True)
         
-        # 使用 [1, 1.5, 1.5, 1] 比例：左右兩邊是空白，中間兩個放按鈕
-        space_l, col_mode_1, col_mode_2, space_r = st.columns([1, 1.5, 1.5, 1])
+        # --- 🔥 核心修正：解決 Wide Mode 跑版 ---
+        # 1. 先建立一個置中的「容器欄位」(center_container)
+        #    比例 [3, 4, 3] 代表中間佔 40% 寬度，左右留白各 30%。
+        #    這樣在大螢幕上不會太寬，在手機上也不會太擠。
+        _, center_container, _ = st.columns([3, 4, 3])
         
-        with col_mode_1:
-            st.markdown("""
-            <div style="text-align: center; margin-bottom: 10px; color: #4B5563; font-size: 0.85rem; height: 40px;">
-                🎴 <b>派對版</b><br><span style="font-size: 0.75rem; color: #9CA3AF;">(需輸入實體卡號)</span>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button("多人派對模式 👥", type="primary", key="btn_party"):
-                if name_input.strip():
-                    st.session_state.user_name = name_input
-                    st.session_state.game_mode = 'party'
-                    st.session_state.stage = 'setup'
-                    st.session_state.data_saved = False
-                    st.rerun()
-                else:
-                    st.warning("⚠️ 請輸入暱稱")
+        with center_container:
+            # 2. 在這個限制好的容器內，再切分左右兩個按鈕
+            #    gap="large" 讓兩個選項中間有一點好看的間距
+            inner_c1, inner_c2 = st.columns(2, gap="large")
+            
+            # --- 左邊：派對版 ---
+            with inner_c1:
+                st.markdown("""
+                <div style="text-align: center; background-color: #F3F4F6; padding: 10px; border-radius: 8px; border: 1px solid #E5E7EB; height: 100%;">
+                    <div style="font-size: 1.2rem;">🎴</div>
+                    <div style="font-weight: bold; color: #4B5563; margin-top: 4px;">派對版</div>
+                    <div style="font-size: 0.75rem; color: #9CA3AF;">輸入實體卡號</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write("") # 間距
+                if st.button("選擇多人 👥", type="secondary", key="btn_party", use_container_width=True):
+                    if name_input.strip():
+                        st.session_state.user_name = name_input
+                        st.session_state.game_mode = 'party'
+                        st.session_state.stage = 'setup'
+                        st.session_state.data_saved = False
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 請輸入暱稱")
 
-        with col_mode_2:
-            st.markdown("""
-            <div style="text-align: center; margin-bottom: 10px; color: #4B5563; font-size: 0.85rem; height: 40px;">
-                🎲 <b>獨享版</b><br><span style="font-size: 0.75rem; color: #9CA3AF;">(系統隨機抽卡)</span>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button("單人獨享模式 👤", key="btn_solo"):
-                if name_input.strip():
-                    st.session_state.user_name = name_input
-                    st.session_state.game_mode = 'solo'
-                    st.session_state.stage = 'setup'
-                    st.session_state.data_saved = False
-                    st.rerun()
-                else:
-                    st.warning("⚠️ 請輸入暱稱")
-        
-        # Footer 維持原樣...
+            # --- 右邊：獨享版 ---
+            with inner_c2:
+                st.markdown("""
+                <div style="text-align: center; background-color: #EFF6FF; padding: 10px; border-radius: 8px; border: 1px solid #BFDBFE; height: 100%;">
+                    <div style="font-size: 1.2rem;">🎲</div>
+                    <div style="font-weight: bold; color: #1E40AF; margin-top: 4px;">獨享版</div>
+                    <div style="font-size: 0.75rem; color: #60A5FA;">系統隨機抽卡</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write("") # 間距
+                # 這裡使用 primary type 讓獨享版看起來比較突出(或可自行調整)
+                if st.button("選擇單人 👤", type="primary", key="btn_solo", use_container_width=True):
+                    if name_input.strip():
+                        st.session_state.user_name = name_input
+                        st.session_state.game_mode = 'solo'
+                        st.session_state.stage = 'setup'
+                        st.session_state.data_saved = False
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 請輸入暱稱")
+
+        # Footer
         st.markdown("---")
+        st.markdown("""
+        <div style="text-align: center; color: #9CA3AF; font-size: 13px; margin-top: 20px;">
+            <div style="display: inline-block; text-align: left; background: white; padding: 15px 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-weight: 700; color: #4B5563; margin-bottom: 8px; text-align: center;">製作團隊IFRCxTS</div>
+                🔹 <b>總策劃：</b>Yen/全家/Color/EN/Liya/小天/Yuna/Renee<br>
+                🔹 <b>技術支援：</b> Yen <br> 
+                🔹 <b>美術支援：</b> Liya <br>    
+                🔹 <b>遊戲設計：</b> 天行 & IFRC<br>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ==========================================
 # 階段 1: Setup
