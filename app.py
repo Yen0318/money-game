@@ -571,7 +571,7 @@ elif st.session_state.stage == 'playing':
                 st.write("")
                 
                 # 下一步按鈕區域
-                c_next1, c_next2, c_next3 = st.columns([1, 2, 1])
+                c_next1, c_next2, c_next3 = st.columns([1, 1, 1])
                 with c_next2:
                     st.markdown("<div style='text-align: center; color: #6B7280; margin-bottom: 10px; font-size: 14px;'>確認目前資產無誤後，請進入命運環節...</div>", unsafe_allow_html=True)
                     # 按下按鈕後，切換狀態並重新整理頁面
