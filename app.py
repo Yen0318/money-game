@@ -679,13 +679,58 @@ elif st.session_state.stage == 'playing':
 
                     # === 模式 B: 獨享版 (顯示抽卡按鈕) ===
                     else:
-                        st.markdown("<div style='text-align: center; color: #6B7280; margin-bottom: 10px;'>🔮 命運掌握在機率手中...</div>", unsafe_allow_html=True)
-                        _, btn_c, _ = st.columns([1, 2, 1]) # 置中縮窄
-                        with btn_c:
+                            st.markdown("<div style='text-align: center; color: #6B7280; margin-bottom: 10px; font-size: 0.9rem;'>🔮 命運掌握在機率手中...</div>", unsafe_allow_html=True)
+                            
+                            # 按鈕放在圖片正下方
                             if st.button("✨ 點擊感應命運 (隨機抽卡)", type="primary", use_container_width=True):
                                 import random
-                                random_card = random.choice(list(EVENT_CARDS.keys()))
-                                st.session_state.event_card_input = random_card
+                                import time
+                                
+                                # 1. 建立特效佔位區
+                                effect_placeholder = st.empty()
+                                progress_bar = st.progress(0)
+                                
+                                all_cards = list(EVENT_CARDS.keys())
+                                final_card_id = random.choice(all_cards)
+                                final_card_name = EVENT_CARDS[final_card_id]['name'] # 🔥 取得最終事件名稱
+                                
+                                # --- 🎬 緊張感特效：事件名稱跳動動畫 ---
+                                # 階段一：極速跳動 (顯示各種可能的事件名稱)
+                                steps = 15
+                                for i in range(steps):
+                                    temp_id = random.choice(all_cards)
+                                    temp_name = EVENT_CARDS[temp_id]['name'] # 🔥 隨機取得名稱
+                                    
+                                    effect_placeholder.markdown(f"""
+                                    <div style="text-align: center; padding: 20px;">
+                                        <div style="font-size: 1.2rem; color: #6B7280; margin-bottom: 10px;">⚡ 正在掃描未來時間線...</div>
+                                        <div style="font-size: 2rem; font-weight: 800; color: #E5E7EB; margin-top: 10px; min-height: 60px;">
+                                            {temp_name}
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    progress_bar.progress(int((i / steps) * 80))
+                                    time.sleep(0.05 + (i * 0.01)) # 越來越慢
+                                
+                                # 階段二：最後閃爍 (鎖定最終名稱)
+                                for _ in range(3):
+                                    effect_placeholder.markdown(f"""
+                                    <div style="text-align: center; padding: 20px;">
+                                        <div style="font-size: 1.2rem; color: #EF4444; margin-bottom: 10px; font-weight: bold;">⚠️ 命運已鎖定！</div>
+                                        <div style="font-size: 2.2rem; font-weight: 800; color: #EF4444; margin-top: 10px; text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); min-height: 60px;">
+                                            {final_card_name}
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    time.sleep(0.15)
+                                    effect_placeholder.empty()
+                                    time.sleep(0.1)
+
+                                progress_bar.progress(100)
+                                time.sleep(0.5) 
+                                
+                                # --- 寫入結果 ID 並重整 ---
+                                st.session_state.event_card_input = final_card_id
                                 st.rerun()
 
                 # ----------------------------------------------------
