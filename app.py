@@ -987,19 +987,38 @@ elif st.session_state.stage == 'playing':
             rb4 = c4.number_input(f"{ASSET_NAMES['Cash']}", 0.0, 100.0, current_pcts['Cash'], step=1.0, format="%.1f", key=f"rb4_{current_year}")
             rb5 = c5.number_input(f"{ASSET_NAMES['Crypto']}", 0.0, 100.0, current_pcts['Crypto'], step=1.0, format="%.1f", key=f"rb5_{current_year}")
             
-            total_rb = rb1 + rb2 + rb3 + rb4 + rb5
-            # 浮點數比對，允許 0.01 的誤差
-            if abs(total_rb - 100.0) > 0.01: 
-                st.warning(f"⚠️ 比例總和錯誤: {total_rb:.1f}% (請手動調整至100%)")
+            # ... (上面是 rb1 ~ rb5 的 number_input 代碼) ...
+
+            # 🔥 修正開始：先加總，然後強制四捨五入到小數點第 1 位
+            raw_sum = rb1 + rb2 + rb3 + rb4 + rb5
+            total_rb = round(raw_sum, 1)
+            
+            # 顯示即時計算結果，讓玩家知道現在是多少
+            if total_rb == 100.0:
+                st.success(f"✅ 目前總和: {total_rb}% (完美)")
+            else:
+                diff = round(100.0 - total_rb, 1)
+                st.error(f"⚠️ 目前總和: {total_rb}% (還差 {diff:+.1f}%)")
+
+            # 判斷邏輯：只要不等於 100.0 就擋住
+            if total_rb != 100.0: 
+                st.warning("請調整比例直到總和為 100% 才能繼續。")
             else:
                 st.write("")
                 if st.button("執行配置 ✅", type="primary"):
+                    # 再次確認比例總和為 100 (或是自動歸一化，但在這裡我們信任 input)
                     props = [rb1, rb2, rb3, rb4, rb5]
+                    
                     st.session_state.config_history[f'Year {current_year}'] = {k: v for k, v in zip(ASSET_KEYS, props)}
+                    
+                    # 更新資產數值
                     for i, key in enumerate(ASSET_KEYS):
                         st.session_state.assets[key] = current_total * (props[i] / 100)
+                    
+                    # 更新歷史紀錄
                     last_rec = st.session_state.history[-1]
                     last_rec.update(st.session_state.assets)
+                    
                     st.session_state.waiting_for_rebalance = False
                     st.rerun()
 
