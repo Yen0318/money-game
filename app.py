@@ -8,6 +8,73 @@ from datetime import datetime
 import plotly.express as px
 import streamlit.components.v1 as components
 import random # <--- 新增這行
+import base64 # 記得確認有沒有 import 這個
+from filelock import FileLock # 記得加這行
+
+# 定義鎖文件 (會在同目錄下產生 .lock 檔)
+SNAPSHOT_LOCK = "game_snapshots.csv.lock"
+RECORD_LOCK = "game_data_records.csv.lock"
+
+def save_snapshot(name, year, assets, current_config):
+    # ... (前面的計算邏輯不變) ...
+    
+    total = sum(assets.values())
+    roi = (total - 1000000) / 1000000 * 100
+    if current_config is None: current_config = {}
+    config_str = " | ".join([f"{ASSET_NAMES.get(k, k)}:{float(v):.0f}%" for k, v in current_config.items()]) if current_config else "初始/未變動"
+
+    data = {
+        '更新時間': datetime.now().strftime("%H:%M:%S"), 
+        '姓名': name,
+        # ... (中間省略) ...
+        '當下配置策略': config_str
+    }
+    
+    file_exists = os.path.isfile(SNAPSHOT_FILE)
+    
+    # 🔥 重點修正：加上 FileLock
+    lock = FileLock(SNAPSHOT_LOCK)
+    try:
+        with lock.acquire(timeout=10): # 等待最多10秒
+            with open(SNAPSHOT_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=data.keys())
+                if not file_exists: writer.writeheader()
+                writer.writerow(data)
+    except Exception as e:
+        print(f"Snapshot Save Error: {e}")
+
+def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
+    # ... (資料準備邏輯不變) ...
+    data = { ... } # 你的資料字典
+
+    file_exists = os.path.isfile(CSV_FILE)
+    
+    # 🔥 重點修正：加上 FileLock
+    lock = FileLock(RECORD_LOCK)
+    try:
+        with lock.acquire(timeout=10):
+            with open(CSV_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=data.keys())
+                if not file_exists: writer.writeheader()
+                writer.writerow(data)
+    except Exception as e:
+        st.error(f"存檔失敗，請重試: {e}")
+
+def autoplay_audio(file_path: str):
+    """讀取音效檔並自動播放"""
+    try:
+        with open(file_path, "rb") as f:
+            data = f.read()
+            b64 = base64.b64encode(data).decode()
+            md = f"""
+                <audio autoplay>
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                </audio>
+                """
+            st.markdown(md, unsafe_allow_html=True)
+    except Exception as e:
+        # 如果找不到檔案或出錯，靜默失敗，不要讓程式崩潰
+        pass
 # --- 0. 輔助函數：獲取在線人數 ---
 def get_active_user_count():
     try:
@@ -65,7 +132,45 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         writer = csv.DictWriter(f, fieldnames=data.keys())
         if not file_exists: writer.writeheader()
         writer.writerow(data)
+# ==========================================
+# 📥 第一步：存檔函數 (請確保這段代碼放在最上面的函數定義區)
+# ==========================================
 
+SNAPSHOT_FILE = 'game_snapshots.csv'
+
+def save_snapshot(name, year, assets, current_config):
+    """
+    記錄當下的資產快照與配置 (供後台即時讀取)
+    """
+    total = sum(assets.values())
+    # 計算目前的 ROI
+    roi = (total - 1000000) / 1000000 * 100
+    
+    # 防呆：如果 current_config 是空的，給預設值
+    if current_config is None:
+        current_config = {}
+        
+    # 整理配置字串
+    config_str = " | ".join([f"{ASSET_NAMES.get(k, k)}:{float(v):.0f}%" for k, v in current_config.items()]) if current_config else "初始/未變動"
+
+    data = {
+        '更新時間': datetime.now().strftime("%H:%M:%S"), 
+        '姓名': name,
+        '目前年份': year,
+        '總資產': int(total),
+        '報酬率(%)': round(roi, 1),
+        '當下配置策略': config_str
+    }
+    
+    # 寫入 CSV (如果檔案不存在會自動建立)
+    file_exists = os.path.isfile(SNAPSHOT_FILE)
+    try:
+        with open(SNAPSHOT_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=data.keys())
+            if not file_exists: writer.writeheader()
+            writer.writerow(data)
+    except Exception as e:
+        print(f"Snapshot Error: {e}")
 # ==========================================
 # ⚡️ 核心初始化區 (State Initialization)
 # ==========================================
@@ -351,8 +456,40 @@ with st.sidebar:
         # --- 3. 即時戰況與數據導出 ---
         with st.expander("📊 現場數據監控", expanded=True):
             active_users = get_active_user_count()
-            st.metric("🟢 目前同時在線人數", f"{active_users} 人")
+        #    st.metric("🟢 目前同時在線人數", f"{active_users} 人")
             st.markdown("---")            
+            # 🔥 【加入這段】即時戰況看板
+            if st.button("🔄 刷新戰況榜"):
+                st.rerun()
+                
+            if os.path.exists(SNAPSHOT_FILE):
+                try:
+                    df_snap = pd.read_csv(SNAPSHOT_FILE)
+                    if not df_snap.empty:
+                        # 邏輯：依時間排序 -> 依姓名去重(留最新) -> 依資產排序
+                        df_snap = df_snap.sort_values(by=['更新時間'], ascending=False)
+                        df_leaderboard = df_snap.drop_duplicates(subset=['姓名'], keep='first')
+                        df_leaderboard = df_leaderboard.sort_values(by='總資產', ascending=False).reset_index(drop=True)
+                        
+                        # 顯示第一名 Highlights
+                        if len(df_leaderboard) > 0:
+                            top1 = df_leaderboard.iloc[0]
+                            st.info(f"🥇 目前領先: **{top1['姓名']}** (Year {top1['目前年份']})\n\n💰 資產: ${int(top1['總資產']):,}")
+                        
+                        # 顯示完整表格
+                        st.dataframe(
+                            df_leaderboard[['姓名', '目前年份', '總資產', '報酬率(%)', '當下配置策略']], 
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                    else:
+                        st.caption("等待玩家數據...")
+                except Exception as e:
+                    st.error(f"讀取錯誤: {e}")
+            else:
+                st.caption("尚無快照紀錄檔")
+
+            st.markdown("---")
             if os.path.exists(CSV_FILE):
                 df_rec = pd.read_csv(CSV_FILE)
                 st.write(f"目前累積完賽人數: `{len(df_rec)}`")
@@ -372,7 +509,16 @@ with st.sidebar:
                     os.remove(CSV_FILE)
                     st.success("數據已清空")
                     st.rerun()
+            # 2. 🔥 新增：刪除即時快照檔 (SNAPSHOT_FILE)
+                if os.path.exists(SNAPSHOT_FILE):
+                    os.remove(SNAPSHOT_FILE)
 
+                st.success("數據已全面清空 (包含即時戰況與結算紀錄)！")
+                
+                # 等待一下讓提示顯示，然後刷新頁面
+                import time
+                time.sleep(1)
+                st.rerun()    
         st.markdown("---")
         if st.button("🔒 重新鎖定系統"):
             st.session_state.admin_unlocked = False
@@ -389,7 +535,7 @@ st.markdown("""
             font-family: 'Inter', sans-serif;
             text-transform: uppercase;
         ">
-            IFRC <span style="color: #F59E0B;">x</span> TS
+            IFRC <span style="color: #F59E0B;">x</span> TS <span style="color: #F59E0B;">x</span> 人生CEO
         </div>
         <h1 style="
             font-size: 2.5rem; 
@@ -571,13 +717,19 @@ elif st.session_state.stage == 'setup':
             st.write("")
             if st.button("確定配置 ✅", type="primary"):
                 props = [p1, p2, p3, p4, p5]
-                st.session_state.config_history['Year 0'] = {k: v for k, v in zip(ASSET_KEYS, props)}
+                config_dict = {k: v for k, v in zip(ASSET_KEYS, props)}
+                st.session_state.config_history['Year 0'] = config_dict
+                
                 for i, key in enumerate(ASSET_KEYS):
                     st.session_state.assets[key] = initial_wealth * (props[i] / 100)
                 
                 record = {'Year': 0, 'Total': initial_wealth}
                 record.update(st.session_state.assets)
                 st.session_state.history.append(record)
+                
+                # 🔥 【加入這行】存下第 0 年狀態
+                save_snapshot(st.session_state.user_name, 0, st.session_state.assets, config_dict)
+                
                 st.session_state.stage = 'playing'
                 st.rerun()
 
@@ -685,7 +837,13 @@ elif st.session_state.stage == 'playing':
                             if st.button("✨ 點擊感應命運 (隨機抽卡)", type="primary", use_container_width=True):
                                 import random
                                 import time
+                                # --- 🔥 新增：播放緊張音效 ---
+                                # 請確保資料夾內有這個檔案，沒有的話這行會自動忽略
+                                autoplay_audio("sound_effect.aac") 
                                 
+                                # 1. 準備抽卡數據
+                                keys = list(EVENT_CARDS.keys())
+
                                 # 1. 建立特效佔位區
                                 effect_placeholder = st.empty()
                                 progress_bar = st.progress(0)
@@ -696,7 +854,7 @@ elif st.session_state.stage == 'playing':
                                 
                                 # --- 🎬 緊張感特效：事件名稱跳動動畫 ---
                                 # 階段一：極速跳動 (顯示各種可能的事件名稱)
-                                steps = 15
+                                steps = 30
                                 for i in range(steps):
                                     temp_id = random.choice(all_cards)
                                     temp_name = EVENT_CARDS[temp_id]['name'] # 🔥 隨機取得名稱
@@ -938,7 +1096,15 @@ elif st.session_state.stage == 'playing':
                     record.update(st.session_state.assets)
                     st.session_state.history.append(record)
                 
-                st.session_state.year += 10
+                # ... (上面是 for 迴圈計算複利) ...
+                
+                st.session_state.year += 10 
+                
+                # 🔥 【加入這段】存下第 10 或 20 年狀態
+                last_config_year = f"Year {current_year}" # 抓取上一個十年的配置
+                current_config = st.session_state.config_history.get(last_config_year, {})
+                save_snapshot(st.session_state.user_name, st.session_state.year, st.session_state.assets, current_config)
+
                 st.session_state.waiting_for_event = True
                 
                 transition_placeholder.empty()
@@ -951,7 +1117,14 @@ elif st.session_state.stage == 'playing':
 # 階段 3: Finished
 # ==========================================
 elif st.session_state.stage == 'finished':
+    # 🔥 【加入這段】確保第 30 年只存一次
+    if 'final_snapshot_saved' not in st.session_state:
+        final_config = st.session_state.config_history.get('Year 20', {})
+        save_snapshot(st.session_state.user_name, 30, st.session_state.assets, final_config)
+        st.session_state.final_snapshot_saved = True
+
     st.balloons()
+    # ... (後面接原本的顯示邏輯)
     final_wealth = sum(st.session_state.assets.values())
     roi = (final_wealth - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
     
