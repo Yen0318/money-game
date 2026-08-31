@@ -15,60 +15,16 @@ from filelock import FileLock # 記得加這行
 SNAPSHOT_LOCK = "game_snapshots.csv.lock"
 RECORD_LOCK = "game_data_records.csv.lock"
 
-def save_snapshot(name, year, assets, current_config):
-    # ... (前面的計算邏輯不變) ...
-    
-    total = sum(assets.values())
-    roi = (total - 1000000) / 1000000 * 100
-    if current_config is None: current_config = {}
-    config_str = " | ".join([f"{ASSET_NAMES.get(k, k)}:{float(v):.0f}%" for k, v in current_config.items()]) if current_config else "初始/未變動"
-
-    data = {
-        '更新時間': datetime.now().strftime("%H:%M:%S"), 
-        '姓名': name,
-        # ... (中間省略) ...
-        '當下配置策略': config_str
-    }
-    
-    file_exists = os.path.isfile(SNAPSHOT_FILE)
-    
-    # 🔥 重點修正：加上 FileLock
-    lock = FileLock(SNAPSHOT_LOCK)
-    try:
-        with lock.acquire(timeout=10): # 等待最多10秒
-            with open(SNAPSHOT_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=data.keys())
-                if not file_exists: writer.writeheader()
-                writer.writerow(data)
-    except Exception as e:
-        print(f"Snapshot Save Error: {e}")
-
-def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
-    # ... (資料準備邏輯不變) ...
-    data = { ... } # 你的資料字典
-
-    file_exists = os.path.isfile(CSV_FILE)
-    
-    # 🔥 重點修正：加上 FileLock
-    lock = FileLock(RECORD_LOCK)
-    try:
-        with lock.acquire(timeout=10):
-            with open(CSV_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=data.keys())
-                if not file_exists: writer.writeheader()
-                writer.writerow(data)
-    except Exception as e:
-        st.error(f"存檔失敗，請重試: {e}")
-
 def autoplay_audio(file_path: str):
     """讀取音效檔並自動播放"""
     try:
         with open(file_path, "rb") as f:
             data = f.read()
             b64 = base64.b64encode(data).decode()
+            mime = "audio/aac" if file_path.lower().endswith(".aac") else "audio/mpeg"
             md = f"""
                 <audio autoplay>
-                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                <source src="data:{mime};base64,{b64}" type="{mime}">
                 </audio>
                 """
             st.markdown(md, unsafe_allow_html=True)
@@ -112,6 +68,10 @@ EVENT_CARDS = {
     "112": {"name": "金融去槓桿崩盤",    "dividend": 6,  "bond": 7,  "stock": -35,  "cash": -4, "crypto": -70,   "desc": "💥 流動性枯竭，機構被迫平倉，多殺多局面出現。"},
 }
 
+# 🔥 好牌/壞牌池 (供獨享版保底機制使用)：台股上漲的事件視為好牌
+GOOD_CARDS = [k for k, v in EVENT_CARDS.items() if v['stock'] > 0]
+BAD_CARDS = [k for k, v in EVENT_CARDS.items() if v['stock'] <= 0]
+
 CSV_FILE = 'game_data_records.csv'
 
 # --- 存檔函數 ---
@@ -127,11 +87,16 @@ def save_data_to_csv(name, wealth, roi, cards, config_history, feedback):
         '配置_Year20': str(config_history.get('Year 20', '')),
         '玩家反饋': feedback
     }
-    file_exists = os.path.isfile(CSV_FILE)
-    with open(CSV_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-        writer = csv.DictWriter(f, fieldnames=data.keys())
-        if not file_exists: writer.writeheader()
-        writer.writerow(data)
+    lock = FileLock(RECORD_LOCK)
+    try:
+        with lock.acquire(timeout=10):
+            file_exists = os.path.isfile(CSV_FILE)
+            with open(CSV_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=data.keys())
+                if not file_exists: writer.writeheader()
+                writer.writerow(data)
+    except Exception as e:
+        st.error(f"存檔失敗，請重試: {e}")
 # ==========================================
 # 📥 第一步：存檔函數 (請確保這段代碼放在最上面的函數定義區)
 # ==========================================
@@ -154,7 +119,7 @@ def save_snapshot(name, year, assets, current_config):
     config_str = " | ".join([f"{ASSET_NAMES.get(k, k)}:{float(v):.0f}%" for k, v in current_config.items()]) if current_config else "初始/未變動"
 
     data = {
-        '更新時間': datetime.now().strftime("%H:%M:%S"), 
+        '更新時間': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         '姓名': name,
         '目前年份': year,
         '總資產': int(total),
@@ -163,12 +128,14 @@ def save_snapshot(name, year, assets, current_config):
     }
     
     # 寫入 CSV (如果檔案不存在會自動建立)
-    file_exists = os.path.isfile(SNAPSHOT_FILE)
+    lock = FileLock(SNAPSHOT_LOCK)
     try:
-        with open(SNAPSHOT_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-            writer = csv.DictWriter(f, fieldnames=data.keys())
-            if not file_exists: writer.writeheader()
-            writer.writerow(data)
+        with lock.acquire(timeout=10):
+            file_exists = os.path.isfile(SNAPSHOT_FILE)
+            with open(SNAPSHOT_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
+                writer = csv.DictWriter(f, fieldnames=data.keys())
+                if not file_exists: writer.writeheader()
+                writer.writerow(data)
     except Exception as e:
         print(f"Snapshot Error: {e}")
 # ==========================================
@@ -186,6 +153,12 @@ if 'config_history' not in st.session_state: st.session_state.config_history = {
 if 'data_saved' not in st.session_state: st.session_state.data_saved = False
 # 🔥 新增：確保 waiting_for_rebalance 變數存在
 if 'waiting_for_rebalance' not in st.session_state: st.session_state.waiting_for_rebalance = False
+if 'waiting_for_event' not in st.session_state: st.session_state.waiting_for_event = False
+
+# 🔥 獨享版保底機制：整局三次抽卡中，隨機挑一次必出好牌 (恰好一次)
+if 'lucky_draw_round' not in st.session_state: st.session_state.lucky_draw_round = random.randint(1, 3)
+if 'draw_count' not in st.session_state: st.session_state.draw_count = 0
+if 'solo_pick' not in st.session_state: st.session_state.solo_pick = None
 
 # 🔥 新增：動態利率初始化 (讓管理員可以調整)
 if 'dynamic_rates' not in st.session_state: 
@@ -355,18 +328,8 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 3. 初始化 ---
-ASSET_KEYS = ['Dividend', 'USBond', 'TWStock', 'Cash', 'Crypto']
 ASSET_NAMES = {'Dividend': '分紅收益', 'USBond': '美債', 'TWStock': '台股', 'Cash': '現金', 'Crypto': '加密幣'}
 FINANCE_COLORS = {'分紅收益': '#F59E0B', '美債': '#3B82F6', '台股': '#EF4444', '現金': '#9CA3AF', '加密幣': '#8B5CF6'}
-
-if 'stage' not in st.session_state: st.session_state.stage = 'login'
-if 'year' not in st.session_state: st.session_state.year = 0
-if 'assets' not in st.session_state: st.session_state.assets = {k: 0 for k in ASSET_KEYS}
-if 'history' not in st.session_state: st.session_state.history = []
-if 'user_name' not in st.session_state: st.session_state.user_name = ""
-if 'drawn_cards' not in st.session_state: st.session_state.drawn_cards = []
-if 'config_history' not in st.session_state: st.session_state.config_history = {}
-if 'data_saved' not in st.session_state: st.session_state.data_saved = False
 
 # --- 輔助函數 ---
 def render_asset_snapshot(current_assets, title="📊 當前資產快照"):
@@ -507,18 +470,11 @@ with st.sidebar:
             if st.button("🔥 清空所有歷史記錄"):
                 if os.path.exists(CSV_FILE):
                     os.remove(CSV_FILE)
-                    st.success("數據已清空")
-                    st.rerun()
-            # 2. 🔥 新增：刪除即時快照檔 (SNAPSHOT_FILE)
                 if os.path.exists(SNAPSHOT_FILE):
                     os.remove(SNAPSHOT_FILE)
-
                 st.success("數據已全面清空 (包含即時戰況與結算紀錄)！")
-                
-                # 等待一下讓提示顯示，然後刷新頁面
-                import time
                 time.sleep(1)
-                st.rerun()    
+                st.rerun()
         st.markdown("---")
         if st.button("🔒 重新鎖定系統"):
             st.session_state.admin_unlocked = False
@@ -630,6 +586,10 @@ if st.session_state.stage == 'login':
                     if name_input.strip():
                         st.session_state.user_name = name_input
                         st.session_state.game_mode = 'solo'
+                        # 每局重抽保底位置：三次抽卡中隨機一次必為好牌
+                        st.session_state.lucky_draw_round = random.randint(1, 3)
+                        st.session_state.draw_count = 0
+                        st.session_state.solo_pick = None
                         st.session_state.stage = 'setup'
                         st.session_state.data_saved = False
                         st.rerun()
@@ -803,93 +763,126 @@ elif st.session_state.stage == 'playing':
                 # 情況 A: 尚未抽卡 (Clean Code 為空) -> 顯示背面圖 + 操作區
                 # ----------------------------------------------------
                 if clean_code not in EVENT_CARDS:
-                    # 1. 先顯示背面圖片 (置中)
-                    _, cover_c, _ = st.columns([1, 1, 1])
-                    with cover_c:
-                        cover_img = "images/homepage.png"
-                        if os.path.exists(cover_img):
-                            st.image(cover_img, use_container_width=True)
-                        else:
-                            st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
-                    
-                    st.write("") # 增加一點間距
-
-                    # 2. 🔥 修改處：在圖片「下方」根據模式顯示對應操作元件
-                    
-                    # === 模式 A: 派對版 (顯示輸入框) ===
+                    # === 模式 A: 派對版 (背面圖 + 卡號輸入框) ===
                     if st.session_state.get('game_mode', 'party') == 'party':
+                        _, cover_c, _ = st.columns([1, 1, 1])
+                        with cover_c:
+                            cover_img = "images/homepage.png"
+                            if os.path.exists(cover_img):
+                                st.image(cover_img, use_container_width=True)
+                            else:
+                                st.markdown("<div style='text-align: center; font-size: 80px;'>🎴</div>", unsafe_allow_html=True)
+
+                        st.write("") # 增加一點間距
+
                         _, input_c, _ = st.columns([1, 2, 1]) # 置中縮窄
                         with input_c:
+                            # key 綁定年份：避免上一輪輸入的卡號殘留，下一輪自動跳出結果
                             input_val = st.text_input(
                                 "請輸入實體卡片代碼 (3碼)",
-                                placeholder="例如: 101", 
-                                key="event_card_input_widget"
+                                placeholder="例如: 101",
+                                key=f"event_card_input_widget_{current_year}"
                             )
-                            if input_val:
-                                st.session_state.event_card_input = input_val
-                                st.rerun() # 輸入後立即重整以顯示結果
+                            input_code = str(input_val).strip()
+                            if input_code:
+                                if input_code in EVENT_CARDS:
+                                    st.session_state.event_card_input = input_code
+                                    st.rerun() # 輸入後立即重整以顯示結果
+                                else:
+                                    st.error("❌ 查無此卡號，請確認實體卡片代碼 (101 ~ 112)")
 
-                    # === 模式 B: 獨享版 (顯示抽卡按鈕) ===
+                    # === 模式 B: 獨享版 (命運三選一) ===
                     else:
-                            st.markdown("<div style='text-align: center; color: #6B7280; margin-bottom: 10px; font-size: 0.9rem;'>🔮 命運掌握在機率手中...</div>", unsafe_allow_html=True)
-                            
-                            # 按鈕放在圖片正下方
-                            if st.button("✨ 點擊感應命運 (隨機抽卡)", type="primary", use_container_width=True):
-                                import random
-                                import time
-                                # --- 🔥 新增：播放緊張音效 ---
-                                # 請確保資料夾內有這個檔案，沒有的話這行會自動忽略
-                                autoplay_audio("sound_effect.aac") 
-                                
-                                # 1. 準備抽卡數據
-                                keys = list(EVENT_CARDS.keys())
+                        # 防呆：管理員直接跳轉進來時，補上保底機制狀態
+                        if 'lucky_draw_round' not in st.session_state:
+                            st.session_state.lucky_draw_round = random.randint(1, 3)
+                        if 'draw_count' not in st.session_state:
+                            st.session_state.draw_count = 0
 
-                                # 1. 建立特效佔位區
-                                effect_placeholder = st.empty()
-                                progress_bar = st.progress(0)
-                                
-                                all_cards = list(EVENT_CARDS.keys())
-                                final_card_id = random.choice(all_cards)
-                                final_card_name = EVENT_CARDS[final_card_id]['name'] # 🔥 取得最終事件名稱
-                                
-                                # --- 🎬 緊張感特效：事件名稱跳動動畫 ---
-                                # 階段一：極速跳動 (顯示各種可能的事件名稱)
-                                steps = 30
-                                for i in range(steps):
-                                    temp_id = random.choice(all_cards)
-                                    temp_name = EVENT_CARDS[temp_id]['name'] # 🔥 隨機取得名稱
-                                    
-                                    effect_placeholder.markdown(f"""
-                                    <div style="text-align: center; padding: 20px;">
-                                        <div style="font-size: 1.2rem; color: #6B7280; margin-bottom: 10px;">⚡ 正在掃描未來時間線...</div>
-                                        <div style="font-size: 2rem; font-weight: 800; color: #E5E7EB; margin-top: 10px; min-height: 60px;">
-                                            {temp_name}
-                                        </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                    progress_bar.progress(int((i / steps) * 80))
-                                    time.sleep(0.05 + (i * 0.01)) # 越來越慢
-                                
-                                # 階段二：最後閃爍 (鎖定最終名稱)
-                                for _ in range(3):
-                                    effect_placeholder.markdown(f"""
-                                    <div style="text-align: center; padding: 20px;">
-                                        <div style="font-size: 1.2rem; color: #EF4444; margin-bottom: 10px; font-weight: bold;">⚠️ 命運已鎖定！</div>
-                                        <div style="font-size: 2.2rem; font-weight: 800; color: #EF4444; margin-top: 10px; text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); min-height: 60px;">
-                                            {final_card_name}
-                                        </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                    time.sleep(0.15)
-                                    effect_placeholder.empty()
-                                    time.sleep(0.1)
+                        st.markdown("""
+                        <div style='text-align: center; margin-bottom: 16px;'>
+                            <div style='font-size: 1.15rem; font-weight: 700; color: #1E40AF;'>🔮 命運三選一</div>
+                            <div style='color: #6B7280; font-size: 0.9rem; margin-top: 4px;'>三張命運卡中，暗藏著一張逆轉局勢的機會...憑直覺選一張吧！</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                                progress_bar.progress(100)
-                                time.sleep(0.5) 
-                                
-                                # --- 寫入結果 ID 並重整 ---
-                                st.session_state.event_card_input = final_card_id
-                                st.rerun()
+                        picked_pos = None
+                        cover_img = "images/homepage.png"
+                        card_cols = st.columns(3, gap="large")
+                        for idx, pos in enumerate(['A', 'B', 'C']):
+                            with card_cols[idx]:
+                                if os.path.exists(cover_img):
+                                    st.image(cover_img, use_container_width=True)
+                                else:
+                                    st.markdown("<div style='text-align: center; font-size: 60px;'>🎴</div>", unsafe_allow_html=True)
+                                if st.button(f"選擇 {pos}", type="primary", use_container_width=True, key=f"pick_{pos}_{current_year}"):
+                                    picked_pos = pos
+
+                        if picked_pos:
+                            # --- 🔥 播放緊張音效 ---
+                            autoplay_audio("sound_effect.aac")
+
+                            # 🔥 保底機制：整局三次抽卡，恰好一次落在好牌池 (第幾次由 lucky_draw_round 決定)
+                            # 玩家選 A/B/C 只是儀式感，實際結果由後台機率決定
+                            st.session_state.draw_count += 1
+                            if st.session_state.draw_count == st.session_state.lucky_draw_round:
+                                final_card_id = random.choice(GOOD_CARDS)
+                            else:
+                                final_card_id = random.choice(BAD_CARDS)
+                            final_card_name = EVENT_CARDS[final_card_id]['name']
+
+                            # 另外兩張的翻牌結果：抽到壞牌時，未選的兩張必有一張好牌「擦肩而過」；
+                            # 抽到好牌時，另外兩張都是壞牌，讓玩家覺得直覺神準
+                            other_pos = [p for p in ['A', 'B', 'C'] if p != picked_pos]
+                            bad_others = random.sample([c for c in BAD_CARDS if c != final_card_id], 2)
+                            if final_card_id in GOOD_CARDS:
+                                other_cards = bad_others
+                            else:
+                                other_cards = [random.choice(GOOD_CARDS), bad_others[0]]
+                                random.shuffle(other_cards)
+                            st.session_state.solo_pick = {
+                                'picked': picked_pos,
+                                'others': list(zip(other_pos, other_cards))
+                            }
+
+                            # --- 🎬 緊張感特效：事件名稱跳動動畫 ---
+                            effect_placeholder = st.empty()
+                            progress_bar = st.progress(0)
+                            all_cards = list(EVENT_CARDS.keys())
+
+                            steps = 30
+                            for i in range(steps):
+                                temp_name = EVENT_CARDS[random.choice(all_cards)]['name']
+                                effect_placeholder.markdown(f"""
+                                <div style="text-align: center; padding: 20px;">
+                                    <div style="font-size: 1.2rem; color: #6B7280; margin-bottom: 10px;">⚡ 正在翻開命運卡 {picked_pos}...</div>
+                                    <div style="font-size: 2rem; font-weight: 800; color: #E5E7EB; margin-top: 10px; min-height: 60px;">
+                                        {temp_name}
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                progress_bar.progress(int((i / steps) * 80))
+                                time.sleep(0.05 + (i * 0.01)) # 越來越慢
+
+                            for _ in range(3):
+                                effect_placeholder.markdown(f"""
+                                <div style="text-align: center; padding: 20px;">
+                                    <div style="font-size: 1.2rem; color: #EF4444; margin-bottom: 10px; font-weight: bold;">⚠️ 命運已鎖定！</div>
+                                    <div style="font-size: 2.2rem; font-weight: 800; color: #EF4444; margin-top: 10px; text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); min-height: 60px;">
+                                        {final_card_name}
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                time.sleep(0.15)
+                                effect_placeholder.empty()
+                                time.sleep(0.1)
+
+                            progress_bar.progress(100)
+                            time.sleep(0.5)
+
+                            # --- 寫入結果 ID 並重整 ---
+                            st.session_state.event_card_input = final_card_id
+                            st.rerun()
 
                 # ----------------------------------------------------
                 # 情況 B: 已有卡片代碼 -> 顯示結果與結算
@@ -934,6 +927,34 @@ elif st.session_state.stage == 'playing':
                         </div>
                         """, unsafe_allow_html=True)
 
+                    # 🃏 獨享版：翻開另外兩張未選的牌 (三選一的戲劇感結尾)
+                    solo_pick = st.session_state.get('solo_pick')
+                    if st.session_state.get('game_mode') == 'solo' and solo_pick and solo_pick.get('others'):
+                        st.write("")
+                        others_html = ""
+                        missed_good = False
+                        for pos, cid in solo_pick['others']:
+                            other_card = EVENT_CARDS[cid]
+                            is_good = cid in GOOD_CARDS
+                            if is_good: missed_good = True
+                            chip_color = '#10B981' if is_good else '#EF4444'
+                            chip_bg = '#ECFDF5' if is_good else '#FEF2F2'
+                            chip_text = '📈 上漲行情' if is_good else '📉 下跌行情'
+                            others_html += f"""
+                            <div style="flex: 1; background: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; text-align: center;">
+                                <div style="color: #6B7280; font-size: 12px;">你沒選的 {pos}</div>
+                                <div style="color: #1F2937; font-weight: 700; margin: 4px 0;">{other_card['name']}</div>
+                                <div style="display: inline-block; color: {chip_color}; background: {chip_bg}; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;">{chip_text}</div>
+                            </div>"""
+                        tease_text = "😱 上漲行情就在隔壁，與你擦肩而過..." if missed_good else "🎯 你的直覺太神了！另外兩張都是災難！"
+                        st.markdown(f"""
+                        <div style="background: #F9FAFB; border: 1px dashed #D1D5DB; border-radius: 12px; padding: 16px;">
+                            <div style="text-align: center; color: #4B5563; font-weight: 700; margin-bottom: 10px;">🃏 翻開另外兩張命運卡</div>
+                            <div style="display: flex; gap: 12px;">{others_html}</div>
+                            <div style="text-align: center; color: #6B7280; font-size: 13px; margin-top: 10px;">{tease_text}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
                     st.write("")
                     # 結算按鈕 (維持原樣)
                     if st.button("迎接命運衝擊 📉", type="primary"):
@@ -950,8 +971,9 @@ elif st.session_state.stage == 'playing':
                         last_rec['Total'] = sum(st.session_state.assets.values())
                         
                         st.session_state.waiting_for_event = False
-                        st.session_state.show_card_input = False 
-                        st.session_state.event_card_input = "" 
+                        st.session_state.show_card_input = False
+                        st.session_state.event_card_input = ""
+                        st.session_state.solo_pick = None
                         
                         if current_year >= 30: st.session_state.stage = 'finished'
                         else: st.session_state.waiting_for_rebalance = True
@@ -1148,12 +1170,9 @@ elif st.session_state.stage == 'finished':
     roi = (final_wealth - st.session_state.history[0]['Total']) / st.session_state.history[0]['Total'] * 100
     
  # --- 🏆 30年最終分級 (修正版) ---
-    # 邏輯：
-    # 1. 虧損 (ROI < 0): 遇到黑天鵝，直接破產。
-    # 2. 跑輸通膨 (0 < ROI < 150): 30年只賺不到1.5倍，其實購買力是下降的 (定存族)。
-    # 3. 普通人 (150 < ROI < 500): 合理的股市回報。
-    # 4. 高手 (500 < ROI < 1000): 有避開大跌，並吃到複利。
-    # 5. 傳奇 (> 1000): 運氣與實力兼具。
+    # 門檻對照 (與下方程式碼一致)：
+    # <0 破產俱樂部 | <200 佛系定存族 | <300 佛系理財族 | <400 理財小白
+    # <600 理財老手 | <800 投資理財老鳥 | <1200 自由財富號 | >=1200 投資界的神
 
     if roi < 0:
         rank_title = "💸 破產俱樂部"
