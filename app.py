@@ -802,7 +802,7 @@ elif st.session_state.stage == 'playing':
                         st.markdown("""
                         <div style='text-align: center; margin-bottom: 16px;'>
                             <div style='font-size: 1.15rem; font-weight: 700; color: #1E40AF;'>🔮 命運三選一</div>
-                            <div style='color: #6B7280; font-size: 0.9rem; margin-top: 4px;'>三張命運卡中，暗藏著一張逆轉局勢的機會...憑直覺選一張吧！</div>
+                            <div style='color: #6B7280; font-size: 0.9rem; margin-top: 4px;'>憑直覺選一張吧！</div>
                         </div>
                         """, unsafe_allow_html=True)
 
