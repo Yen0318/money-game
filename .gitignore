@@ -1,0 +1,7 @@
+# 執行期間產生的資料，不進版控
+game_sessions/
+game_data_records.csv
+game_snapshots.csv
+*.lock
+__pycache__/
+*.pyc

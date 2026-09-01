@@ -1,0 +1,22 @@
+# IFRC「扭轉命運 30 年」— 活動現場用設定
+#
+# 為什麼需要這個檔案：Streamlit 預設只保留「斷線 session」120 秒。
+# 玩家手機螢幕關掉、切到別的 App 超過兩分鐘再回來，遊戲進度就會被清掉、
+# 被踢回首頁重玩。活動現場一定會發生，所以把保留時間拉長。
+
+[server]
+# 斷線後保留遊戲進度的時間 (秒)。3600 = 1 小時，足以涵蓋整場活動。
+disconnectedSessionTTL = 3600
+
+# 定期 ping 讓連線不會被中間的代理伺服器 (例如 Railway) 判定閒置而切斷。
+websocketPingInterval = 20
+
+# 上傳限制調小，這個遊戲不需要上傳檔案。
+maxUploadSize = 5
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# 現場玩家看到 Python 例外訊息沒有意義，只會嚇到人。
+showErrorDetails = "none"

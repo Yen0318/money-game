@@ -10,6 +10,7 @@ import streamlit.components.v1 as components
 import random # <--- 新增這行
 import base64 # 記得確認有沒有 import 這個
 import json
+import uuid
 from filelock import FileLock # 記得加這行
 
 # 定義鎖文件 (會在同目錄下產生 .lock 檔)
@@ -211,6 +212,66 @@ def save_snapshot(name, year, assets, current_config):
     except Exception as e:
         print(f"Snapshot Error: {e}")
 # ==========================================
+# 💾 遊戲進度續玩機制 (Crash / 斷線復原)
+# ==========================================
+# 為什麼需要：Streamlit 的遊戲進度只存在記憶體的 session 裡。玩家手機螢幕關閉、
+# 切到別的 App 太久，或 iOS Safari 為了省記憶體把背景分頁直接丟掉，回來就是
+# 整頁重載 —— session 沒了，30 年進度歸零、被踢回首頁。
+# 解法：在網址掛一個 pid，並把進度另外存成檔案；重載時靠網址上的 pid 找回進度。
+SESSION_DIR = 'game_sessions'
+
+# 需要一起還原的欄位 (刻意不含 flip_pending / jump_pending 這類轉場動畫的暫時狀態)
+RESUME_KEYS = [
+    'stage', 'year', 'assets', 'history', 'user_name', 'drawn_cards',
+    'config_history', 'data_saved', 'waiting_for_rebalance', 'waiting_for_event',
+    'lucky_draw_round', 'draw_count', 'solo_pick', 'last_decade_report',
+    'dynamic_rates', 'game_mode', 'show_card_input', 'event_card_input',
+    'final_snapshot_saved',
+]
+
+
+def save_game_state():
+    """把目前進度寫成檔案，讓玩家重新整理或斷線後能接續。"""
+    pid = st.session_state.get('player_id')
+    if not pid:
+        return
+    try:
+        os.makedirs(SESSION_DIR, exist_ok=True)
+        data = {k: st.session_state.get(k) for k in RESUME_KEYS}
+        data['_saved_at'] = time.time()
+        # 先寫暫存檔再原子性換名，避免寫到一半斷電留下壞掉的半個檔案
+        tmp = os.path.join(SESSION_DIR, f".{pid}.tmp")
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, os.path.join(SESSION_DIR, f"{pid}.json"))
+    except Exception as e:
+        print(f"State save error: {e}")
+
+
+def load_game_state(pid: str):
+    """讀回進度檔；找不到或壞檔就回 None (玩家會從首頁重新開始)。"""
+    if not pid or not str(pid).isalnum():   # 擋掉 ../ 之類的路徑穿越
+        return None
+    try:
+        with open(os.path.join(SESSION_DIR, f"{pid}.json"), encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def purge_old_states(max_age_sec: int = 86400):
+    """清掉一天以前的進度檔，避免檔案無限累積。"""
+    try:
+        now = time.time()
+        for fn in os.listdir(SESSION_DIR):
+            fp = os.path.join(SESSION_DIR, fn)
+            if os.path.isfile(fp) and now - os.path.getmtime(fp) > max_age_sec:
+                os.remove(fp)
+    except Exception:
+        pass
+
+
+# ==========================================
 # ⚡️ 核心初始化區 (State Initialization)
 # ==========================================
 # 1. 遊戲核心變數
@@ -238,6 +299,26 @@ if 'last_decade_report' not in st.session_state: st.session_state.last_decade_re
 # 🔥 新增：動態利率初始化 (讓管理員可以調整)
 if 'dynamic_rates' not in st.session_state: 
     st.session_state.dynamic_rates = BASE_RATES.copy()
+
+# 🔥 斷線 / 重新載入後，用網址上的 pid 把進度接回來
+if 'player_id' not in st.session_state:
+    st.session_state.player_id = None
+    st.session_state.resumed = False
+    try:
+        qp_pid = st.query_params.get('pid')
+    except Exception:
+        qp_pid = None
+    if qp_pid:
+        _saved = load_game_state(qp_pid)
+        if _saved and _saved.get('stage') and _saved.get('stage') != 'login':
+            for _k, _v in _saved.items():
+                if not _k.startswith('_'):
+                    st.session_state[_k] = _v
+            st.session_state.player_id = qp_pid
+            # 轉場動畫的暫時狀態不還原，讓玩家停在穩定的畫面上
+            st.session_state.flip_pending = None
+            st.session_state.jump_pending = False
+            st.session_state.resumed = True
 
 
 # 2. 捲動偵測變數
@@ -549,6 +630,7 @@ with st.sidebar:
                     os.remove(CSV_FILE)
                 if os.path.exists(SNAPSHOT_FILE):
                     os.remove(SNAPSHOT_FILE)
+                purge_old_states(max_age_sec=0)   # 一併清掉續玩進度檔
                 st.success("數據已全面清空 (包含即時戰況與結算紀錄)！")
                 time.sleep(1)
                 st.rerun()
@@ -590,6 +672,14 @@ st.markdown("""
         </div>
     </div>
 """, unsafe_allow_html=True)
+
+# 🔥 斷線復原提示：讓玩家知道進度被接回來了，而不是以為遊戲壞掉
+if st.session_state.get('resumed'):
+    st.success(
+        f"🔄 已為 **{st.session_state.get('user_name', '')}** 接回上次的進度"
+        f"（第 {st.session_state.get('year', 0)} 年），可以繼續遊戲！"
+    )
+    st.session_state.resumed = False
 
 # ==========================================
 # 階段 0: 登入與模式選擇 (Login & Mode Selection)
@@ -642,6 +732,10 @@ if st.session_state.stage == 'login':
                     if name_input.strip():
                         st.session_state.user_name = name_input
                         st.session_state.game_mode = 'party'
+                        # 產生玩家識別碼並掛到網址，重新整理/斷線後才找得回進度
+                        st.session_state.player_id = uuid.uuid4().hex[:12]
+                        st.query_params['pid'] = st.session_state.player_id
+                        purge_old_states()
                         st.session_state.stage = 'setup'
                         st.session_state.data_saved = False
                         st.rerun()
@@ -663,6 +757,10 @@ if st.session_state.stage == 'login':
                     if name_input.strip():
                         st.session_state.user_name = name_input
                         st.session_state.game_mode = 'solo'
+                        # 產生玩家識別碼並掛到網址，重新整理/斷線後才找得回進度
+                        st.session_state.player_id = uuid.uuid4().hex[:12]
+                        st.query_params['pid'] = st.session_state.player_id
+                        purge_old_states()
                         # 每局重抽保底位置：三次抽卡中隨機一次必為好牌
                         st.session_state.lucky_draw_round = random.randint(1, 3)
                         st.session_state.draw_count = 0
@@ -773,8 +871,9 @@ elif st.session_state.stage == 'setup':
                 
                 # 🔥 【加入這行】存下第 0 年狀態
                 save_snapshot(st.session_state.user_name, 0, st.session_state.assets, config_dict)
-                
+
                 st.session_state.stage = 'playing'
+                save_game_state()
                 st.rerun()
 
 # ==========================================
@@ -942,6 +1041,7 @@ elif st.session_state.stage == 'playing':
                             if input_code:
                                 if input_code in EVENT_CARDS:
                                     st.session_state.event_card_input = input_code
+                                    save_game_state()
                                     st.rerun() # 輸入後立即重整以顯示結果
                                 else:
                                     st.error("❌ 查無此卡號，請確認實體卡片代碼 (101 ~ 112)")
@@ -962,66 +1062,136 @@ elif st.session_state.stage == 'playing':
                         # --------------------------------------------------
                         if pending:
                             autoplay_audio("sound_effect.aac")
-                            front_uri = img_uri(f"images/{pending['card']}.png", 800)
+
+                            # 三張牌一起翻：讓玩家親眼看到旁邊那兩張是好是壞
+                            picked_pos = pending['picked']
+                            others = dict(st.session_state.get('solo_pick', {}).get('others', []))
+                            slots = []
+                            for pos in ['A', 'B', 'C']:
+                                cid = pending['card'] if pos == picked_pos else others.get(pos)
+                                if not cid:
+                                    continue
+                                card = EVENT_CARDS[cid]
+                                is_good = cid in GOOD_CARDS
+                                slots.append({
+                                    'pos': pos, 'cid': cid, 'name': card['name'],
+                                    'picked': pos == picked_pos,
+                                    'good': is_good,
+                                    'uri': img_uri(f"images/{cid}.png", 560),
+                                })
+
+                            cards_html = ""
+                            for i, s in enumerate(slots):
+                                delay = 0.12 * i  # 些微錯開，三張同時翻但不呆板
+                                tone = '#10B981' if s['good'] else '#EF4444'
+                                tone_bg = '#ECFDF5' if s['good'] else '#FEF2F2'
+                                tone_txt = '📈 上漲行情' if s['good'] else '📉 下跌行情'
+                                sel_cls = ' is-picked' if s['picked'] else ''
+                                badge = (f'<div class="pick-badge">✓ 你選的 {s["pos"]}</div>'
+                                         if s['picked'] else f'<div class="pos-badge">{s["pos"]}</div>')
+                                cards_html += f"""
+                                <div class="flip-slot{sel_cls}">
+                                  <div class="flip-scene">
+                                    <div class="flip-card" style="animation-delay:{delay}s;">
+                                      <div class="flip-face flip-back"><img src="{back_uri}"></div>
+                                      <div class="flip-face flip-front">
+                                        <img src="{s['uri']}">
+                                        <div class="card-no">No.{s['cid']}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {badge}
+                                  <div class="slot-name" style="animation-delay:{delay + 1.5}s;">{s['name']}</div>
+                                  <div class="slot-tone" style="background:{tone_bg}; color:{tone}; animation-delay:{delay + 1.5}s;">{tone_txt}</div>
+                                </div>"""
+
                             flip_html = f"""
                             <style>
                               .flip-stage {{
-                                display:flex; flex-direction:column; align-items:center;
-                                justify-content:center; padding:10px 0;
-                                font-family:'Inter','Noto Sans TC',sans-serif;
+                                font-family:'Inter','Noto Sans TC',sans-serif; padding:6px 0 4px 0;
                               }}
-                              .flip-label {{
-                                color:#6B7280; font-size:15px; margin-bottom:14px; font-weight:600;
-                                animation: labelSwap 1.8s ease forwards;
+                              .flip-title {{
+                                text-align:center; color:#6B7280; font-size:15px;
+                                font-weight:600; margin-bottom:14px;
                               }}
-                              @keyframes labelSwap {{
-                                0%,60% {{ opacity:1; }} 75% {{ opacity:0; }} 100% {{ opacity:0; }}
+                              .flip-row {{
+                                display:grid; grid-template-columns:repeat(3,1fr);
+                                gap:10px; max-width:900px; margin:0 auto; align-items:start;
                               }}
-                              .flip-scene {{ width:min(440px,90vw); aspect-ratio:764/510; perspective:1400px; }}
+                              .flip-slot {{ text-align:center; }}
+                              .flip-scene {{ aspect-ratio:764/510; perspective:1200px; }}
                               .flip-card {{
                                 position:relative; width:100%; height:100%;
                                 transform-style:preserve-3d;
                                 animation: spinFlip 1.6s cubic-bezier(.28,.72,.30,1) forwards;
                               }}
                               @keyframes spinFlip {{
-                                0%   {{ transform: rotateY(0deg)   scale(.94); }}
-                                55%  {{ transform: rotateY(520deg) scale(1.06); }}
+                                0%   {{ transform: rotateY(0deg)   scale(.92); }}
+                                55%  {{ transform: rotateY(520deg) scale(1.04); }}
                                 100% {{ transform: rotateY(900deg) scale(1); }}
                               }}
                               .flip-face {{
                                 position:absolute; inset:0; backface-visibility:hidden;
-                                border-radius:14px; overflow:hidden;
-                                box-shadow:0 14px 34px rgba(0,0,0,.28);
-                                background:#fff;
+                                border-radius:10px; overflow:hidden; background:#fff;
+                                box-shadow:0 8px 20px rgba(0,0,0,.20);
                               }}
                               .flip-face img {{ width:100%; height:100%; object-fit:cover; display:block; }}
                               .flip-front {{ transform: rotateY(180deg); }}
-                              .flip-glow {{
-                                position:absolute; inset:-6px; border-radius:18px; pointer-events:none;
-                                box-shadow:0 0 0 0 rgba(37,99,235,0);
-                                animation: glowHit 0.7s ease-out 1.5s forwards;
+                              /* 抽中的牌面上直接標示卡片編號 */
+                              .card-no {{
+                                position:absolute; top:6px; left:6px;
+                                background:rgba(17,24,39,.82); color:#fff;
+                                font-size:12px; font-weight:800; letter-spacing:.5px;
+                                padding:2px 8px; border-radius:999px;
+                                opacity:0; animation: fadeUp .4s ease 1.5s forwards;
                               }}
-                              @keyframes glowHit {{
-                                0%   {{ box-shadow:0 0 0 0 rgba(37,99,235,.55); }}
-                                100% {{ box-shadow:0 0 34px 12px rgba(37,99,235,0); }}
+                              /* 玩家選中的那張：放大 + 藍框強調 */
+                              .flip-slot.is-picked .flip-scene {{ transform:scale(1.06); }}
+                              .flip-slot.is-picked .flip-face {{
+                                box-shadow:0 12px 28px rgba(37,99,235,.42);
+                                outline:3px solid #2563EB; outline-offset:0;
+                              }}
+                              .flip-slot:not(.is-picked) {{ opacity:.92; }}
+                              .pick-badge {{
+                                display:inline-block; margin-top:12px; background:#2563EB; color:#fff;
+                                font-size:12px; font-weight:700; padding:2px 10px; border-radius:999px;
+                              }}
+                              .pos-badge {{
+                                display:inline-block; margin-top:12px; background:#F3F4F6; color:#9CA3AF;
+                                font-size:12px; font-weight:700; padding:2px 10px; border-radius:999px;
+                              }}
+                              .slot-name {{
+                                font-size:13px; font-weight:700; color:#1F2937; margin-top:6px;
+                                line-height:1.25; opacity:0; animation: fadeUp .45s ease forwards;
+                              }}
+                              .slot-tone {{
+                                display:inline-block; font-size:11px; font-weight:700;
+                                padding:2px 8px; border-radius:999px; margin-top:4px;
+                                opacity:0; animation: fadeUp .45s ease forwards;
+                              }}
+                              @keyframes fadeUp {{
+                                from {{ opacity:0; transform:translateY(6px); }}
+                                to   {{ opacity:1; transform:translateY(0); }}
+                              }}
+                              @media (max-width:520px) {{
+                                .flip-row {{ gap:6px; }}
+                                .slot-name {{ font-size:11px; }}
+                                .slot-tone {{ font-size:10px; padding:1px 6px; }}
+                                .pick-badge, .pos-badge {{ font-size:11px; margin-top:8px; }}
+                                .card-no {{ font-size:10px; padding:1px 6px; }}
                               }}
                             </style>
                             <div class="flip-stage">
-                              <div class="flip-label">🎴 正在翻開命運卡 {pending['picked']}...</div>
-                              <div class="flip-scene">
-                                <div class="flip-card">
-                                  <div class="flip-face flip-back"><img src="{back_uri}"></div>
-                                  <div class="flip-face flip-front"><img src="{front_uri}"></div>
-                                  <div class="flip-glow"></div>
-                                </div>
-                              </div>
+                              <div class="flip-title">🎴 三張命運卡同時翻開...</div>
+                              <div class="flip-row">{cards_html}</div>
                             </div>
                             """
-                            components.html(hide_stale_js(2800) + flip_html, height=380)
+                            components.html(hide_stale_js(3400) + flip_html, height=340)
                             # 動畫在瀏覽器端播放，伺服器只等它跑完 (不再逐格推送畫面)
-                            time.sleep(2.3)
+                            time.sleep(3.0)
                             st.session_state.event_card_input = pending['card']
                             st.session_state.flip_pending = None
+                            save_game_state()
                             st.rerun()
 
                         # --------------------------------------------------
@@ -1105,10 +1275,23 @@ elif st.session_state.stage == 'playing':
                     # 顯示卡片結果區 (維持原樣)
                     col_img, col_desc = st.columns([1, 2])
                     with col_img:
-                        if os.path.exists(image_path): st.image(image_path, use_container_width=True)
-                        else: st.info(f"Card: {clean_code}")
+                        # 卡面左上角疊上卡片編號，方便對照實體卡與後台紀錄
+                        card_uri = img_uri(image_path, 700)
+                        if card_uri:
+                            st.markdown(f"""
+                            <div style="position:relative; border-radius:8px; overflow:hidden;
+                                        box-shadow:0 4px 12px rgba(0,0,0,.12);">
+                              <img src="{card_uri}" style="width:100%; display:block;">
+                              <div style="position:absolute; top:8px; left:8px;
+                                          background:rgba(17,24,39,.85); color:#fff;
+                                          font-size:13px; font-weight:800; letter-spacing:.5px;
+                                          padding:3px 10px; border-radius:999px;">No.{clean_code}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.info(f"Card: {clean_code}")
                     with col_desc:
-                        st.markdown(f"""<div style="background: #F0F9FF; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; height: 100%;"><h3 style="margin-top: 0; color: #1E40AF !important;">{card_data['name']}</h3><p style="font-size: 1.1rem; color: #374151;">{card_data['desc']}</p></div>""", unsafe_allow_html=True)
+                        st.markdown(f"""<div style="background: #F0F9FF; border-left: 4px solid #3B82F6; padding: 16px; border-radius: 4px; height: 100%;"><div style="display:inline-block; background:#1E40AF; color:#fff; font-size:12px; font-weight:800; letter-spacing:.5px; padding:2px 10px; border-radius:999px; margin-bottom:8px;">卡片編號 No.{clean_code}</div><h3 style="margin-top: 0; color: #1E40AF !important;">{card_data['name']}</h3><p style="font-size: 1.1rem; color: #374151;">{card_data['desc']}</p></div>""", unsafe_allow_html=True)
                     
                     st.write("")
                     st.write("#### 📊 市場衝擊預覽 (預估損益)")
@@ -1153,7 +1336,7 @@ elif st.session_state.stage == 'playing':
                             chip_text = '📈 上漲行情' if is_good else '📉 下跌行情'
                             others_html += f"""
                             <div style="flex: 1; background: white; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px; text-align: center;">
-                                <div style="color: #6B7280; font-size: 12px;">你沒選的 {pos}</div>
+                                <div style="color: #6B7280; font-size: 12px;">你沒選的 {pos} · No.{cid}</div>
                                 <div style="color: #1F2937; font-weight: 700; margin: 4px 0;">{other_card['name']}</div>
                                 <div style="display: inline-block; color: {chip_color}; background: {chip_bg}; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;">{chip_text}</div>
                             </div>"""
@@ -1188,6 +1371,7 @@ elif st.session_state.stage == 'playing':
                         
                         if current_year >= 30: st.session_state.stage = 'finished'
                         else: st.session_state.waiting_for_rebalance = True
+                        save_game_state()
                         st.rerun()
 
     # --- 2. 再平衡階段 ---
@@ -1272,6 +1456,7 @@ elif st.session_state.stage == 'playing':
                     last_rec.update(st.session_state.assets)
                     
                     st.session_state.waiting_for_rebalance = False
+                    save_game_state()
                     st.rerun()
 
 # --- 3. 推進時間軸 ---
@@ -1462,6 +1647,7 @@ elif st.session_state.stage == 'playing':
                 st.session_state.waiting_for_event = True
                 st.session_state.jump_pending = False
 
+                save_game_state()
                 transition_placeholder.empty()
                 st.rerun()
     # 🔥 記得移除原本放在最下面的 render_asset_snapshot 呼叫（因為已經搬到上面了）
@@ -1654,13 +1840,18 @@ elif st.session_state.stage == 'finished':
             if not st.session_state.data_saved:
                 save_data_to_csv(st.session_state.user_name, final_wealth, roi, st.session_state.drawn_cards, st.session_state.config_history, feedback)
                 st.session_state.data_saved = True
+                save_game_state()
                 st.success("✅ 數據已成功上傳。")
                 import time
                 time.sleep(1) 
                 st.rerun()    
 
     if st.button("🔄 開啟新挑戰"):
-        for key in st.session_state.keys(): del st.session_state[key]
+        try:
+            st.query_params.clear()   # 清掉 pid，否則會被自動復原回這一局
+        except Exception:
+            pass
+        for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 # ------------------------------------------------
 # 🦶 頁尾 Footer (放在程式碼最後面，縮排最外層)
