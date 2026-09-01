@@ -9,11 +9,83 @@ import plotly.express as px
 import streamlit.components.v1 as components
 import random # <--- 新增這行
 import base64 # 記得確認有沒有 import 這個
+import json
 from filelock import FileLock # 記得加這行
 
 # 定義鎖文件 (會在同目錄下產生 .lock 檔)
 SNAPSHOT_LOCK = "game_snapshots.csv.lock"
 RECORD_LOCK = "game_data_records.csv.lock"
+
+@st.cache_data(show_spinner=False)
+def img_uri(path: str, max_px: int = 0) -> str:
+    """讀圖並轉成可直接放進 <img src> / CSS url() 的 data URI (快取)。
+
+    max_px > 0 時等比縮到長邊不超過 max_px 並以 JPEG 重新編碼。
+    原因：卡背圖原檔 1000x1000、base64 後約 100KB，但畫面只顯示約 210px；
+    這串字每次頁面重整都要經 websocket 送到瀏覽器，多人同時使用時很吃頻寬。
+    改成 JPEG 縮圖後約 30KB (-70%)，且 JPEG 沒有相容性問題 (現場手機一定顯示得出來)。
+    """
+    try:
+        if max_px > 0:
+            from PIL import Image
+            import io
+            with Image.open(path) as im:
+                im.thumbnail((max_px, max_px), Image.LANCZOS)
+                if im.mode != "RGB":
+                    im = im.convert("RGBA") if im.mode in ("RGBA", "LA", "P") else im.convert("RGB")
+                if im.mode == "RGBA":  # JPEG 不支援透明 -> 疊到白底
+                    bg = Image.new("RGB", im.size, (255, 255, 255))
+                    bg.paste(im, mask=im.split()[-1])
+                    im = bg
+                buf = io.BytesIO()
+                im.save(buf, format="JPEG", quality=85, optimize=True)
+                return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+        with open(path, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
+
+
+def hide_stale_js(duration_ms: int) -> str:
+    """動畫播放期間隱藏 Streamlit 的『舊畫面殘影』(data-stale)，結束後自動還原。
+
+    Streamlit 在腳本跑完前會保留上一輪的 DOM 並調暗，轉場動畫期間看起來像殘影。
+    這段腳本從元件 iframe 注入一條 CSS 到母文件；還原用的計時器必須「建立在母文件的
+    執行環境」，否則 iframe 一被移除，計時器的閉包就跟著失效、樣式永遠留著
+    (那會害之後每次重整都閃爍)。
+    """
+    token = f"t{int(time.time() * 1000)}"
+    return f"""
+    <script>
+      (function() {{
+        var doc = window.parent.document, ID = 'ifrc-hide-stale';
+        var old = doc.getElementById(ID);
+        if (old) old.remove();
+
+        var st = doc.createElement('style');
+        st.id = ID;
+        st.dataset.token = '{token}';
+        st.textContent = "[data-stale='true']{{display:none!important;}}";
+        doc.head.appendChild(st);
+
+        // 在母文件執行環境建立還原計時器 (帶 token，避免誤刪後續動畫的樣式)
+        var sc = doc.createElement('script');
+        sc.textContent =
+          "setTimeout(function(){{" +
+          "  var e = document.getElementById('ifrc-hide-stale');" +
+          "  if (e && e.dataset.token === '{token}') e.remove();" +
+          "}}, {duration_ms});";
+        doc.head.appendChild(sc);
+        sc.remove();
+      }})();
+    </script>
+    """
+
+
+def decade_multiplier(rate: float) -> float:
+    """某年化利率複利十年後的倍數"""
+    return (1 + rate) ** 10
+
 
 def autoplay_audio(file_path: str):
     """讀取音效檔並自動播放"""
@@ -159,6 +231,9 @@ if 'waiting_for_event' not in st.session_state: st.session_state.waiting_for_eve
 if 'lucky_draw_round' not in st.session_state: st.session_state.lucky_draw_round = random.randint(1, 3)
 if 'draw_count' not in st.session_state: st.session_state.draw_count = 0
 if 'solo_pick' not in st.session_state: st.session_state.solo_pick = None
+if 'flip_pending' not in st.session_state: st.session_state.flip_pending = None
+if 'jump_pending' not in st.session_state: st.session_state.jump_pending = False
+if 'last_decade_report' not in st.session_state: st.session_state.last_decade_report = None
 
 # 🔥 新增：動態利率初始化 (讓管理員可以調整)
 if 'dynamic_rates' not in st.session_state: 
@@ -404,6 +479,8 @@ with st.sidebar:
                         
                 st.session_state.waiting_for_event = False
                 st.session_state.waiting_for_rebalance = False
+                st.session_state.jump_pending = False
+                st.session_state.flip_pending = None
                 st.rerun()
 
         # --- 2. 動態市場調控 (上帝模式) ---
@@ -590,6 +667,9 @@ if st.session_state.stage == 'login':
                         st.session_state.lucky_draw_round = random.randint(1, 3)
                         st.session_state.draw_count = 0
                         st.session_state.solo_pick = None
+                        st.session_state.flip_pending = None
+                        st.session_state.jump_pending = False
+                        st.session_state.last_decade_report = None
                         st.session_state.stage = 'setup'
                         st.session_state.data_saved = False
                         st.rerun()
@@ -635,6 +715,8 @@ elif st.session_state.stage == 'setup':
             rate_data.append({
                 "資產項目": ASSET_NAMES[key],
                 "基礎年化報酬": f"{int(BASE_RATES[key]*100)}%",
+                "十年複利倍數": f"×{decade_multiplier(BASE_RATES[key]):.2f}",
+                "每 10 萬變成": f"${int(100000 * decade_multiplier(BASE_RATES[key])):,}",
                 "風險屬性": risk_map.get(key, "未知")
             })
             
@@ -648,6 +730,8 @@ elif st.session_state.stage == 'setup':
             column_config={
                 "資產項目": st.column_config.TextColumn("資產項目", help="資產的種類"),
                 "基礎年化報酬": st.column_config.TextColumn("基礎年化報酬", help="每年預期會自動增長的比例"),
+                "十年複利倍數": st.column_config.TextColumn("十年複利倍數", help="(1+年化報酬)^10，複利滾十年後會變成幾倍"),
+                "每 10 萬變成": st.column_config.TextColumn("每 10 萬變成", help="放 10 萬進去，十年後在沒有事件衝擊下會變成多少"),
             }
         )
         st.markdown("---")
@@ -731,6 +815,77 @@ elif st.session_state.stage == 'playing':
                 st.markdown(f"""<div style="text-align: center; margin-bottom: 20px;"><h2>🔔 第 {current_year} 年：資產檢視</h2></div>""", unsafe_allow_html=True)
                 
                 # 這裡顯示資產快照 (依您的需求，這時候才顯示)
+                # 🔥 十年 IRR 貢獻明細：把「配置比例 × 年化報酬」直接換算成賺到的錢
+                rpt = st.session_state.get('last_decade_report')
+                if rpt:
+                    st.markdown(f"#### 💹 第 {rpt['from_year']} → {rpt['to_year']} 年　各資產複利成長明細")
+                    st.caption("這十年市場風平浪靜，純粹是「年化報酬率 × 複利十年」把你的錢變大。")
+
+                    rows_html = ""
+                    for k in ASSET_KEYS:
+                        b, a = rpt['before'][k], rpt['after'][k]
+                        rate = rpt['rates'][k]
+                        mult = decade_multiplier(rate)
+                        gain = a - b
+                        color = FINANCE_COLORS[ASSET_NAMES[k]]
+                        gain_color = '#10B981' if gain > 0 else ('#EF4444' if gain < 0 else '#6B7280')
+                        bar_pct = min(100, (mult - 1) * 100 / 1.6) if mult > 1 else 0
+                        rows_html += f"""
+                        <tr>
+                          <td style="padding:9px 8px; border-bottom:1px solid #F3F4F6;">
+                            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:{color};margin-right:7px;"></span>
+                            <b>{ASSET_NAMES[k]}</b>
+                          </td>
+                          <td style="padding:9px 8px; border-bottom:1px solid #F3F4F6; text-align:center; color:#374151;">
+                            {rate*100:.0f}% / 年
+                          </td>
+                          <td style="padding:9px 8px; border-bottom:1px solid #F3F4F6; text-align:center;">
+                            <b style="color:{color};">×{mult:.2f}</b>
+                            <div style="height:4px;background:#F3F4F6;border-radius:99px;margin-top:4px;overflow:hidden;">
+                              <div style="height:100%;width:{bar_pct:.0f}%;background:{color};"></div>
+                            </div>
+                          </td>
+                          <td style="padding:9px 8px; border-bottom:1px solid #F3F4F6; text-align:right; color:#6B7280;">
+                            ${int(b):,}
+                          </td>
+                          <td style="padding:9px 8px; border-bottom:1px solid #F3F4F6; text-align:right;">
+                            <b>${int(a):,}</b>
+                          </td>
+                          <td style="padding:9px 8px; border-bottom:1px solid #F3F4F6; text-align:right; color:{gain_color}; font-weight:700;">
+                            {'+' if gain >= 0 else '-'}${int(abs(gain)):,}
+                          </td>
+                        </tr>"""
+
+                    tb, ta = sum(rpt['before'].values()), sum(rpt['after'].values())
+                    st.markdown(f"""
+                    <div style="overflow-x:auto;">
+                    <table style="width:100%; border-collapse:collapse; background:#fff; border-radius:10px;
+                                  font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,.05);">
+                      <thead>
+                        <tr style="background:#F9FAFB; color:#6B7280; font-size:12px; text-align:left;">
+                          <th style="padding:9px 8px;">資產</th>
+                          <th style="padding:9px 8px; text-align:center;">年化報酬 (IRR)</th>
+                          <th style="padding:9px 8px; text-align:center;">十年複利倍數</th>
+                          <th style="padding:9px 8px; text-align:right;">十年前</th>
+                          <th style="padding:9px 8px; text-align:right;">十年後</th>
+                          <th style="padding:9px 8px; text-align:right;">賺到</th>
+                        </tr>
+                      </thead>
+                      <tbody>{rows_html}</tbody>
+                      <tfoot>
+                        <tr style="background:#ECFDF5; font-weight:800; color:#065F46;">
+                          <td style="padding:11px 8px;">合計</td>
+                          <td></td><td></td>
+                          <td style="padding:11px 8px; text-align:right;">${int(tb):,}</td>
+                          <td style="padding:11px 8px; text-align:right;">${int(ta):,}</td>
+                          <td style="padding:11px 8px; text-align:right;">+${int(ta-tb):,}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.markdown("---")
+
                 render_asset_snapshot(st.session_state.assets, title="📊 請確認您的資產 (衝擊前)")
                 
                 st.write("")
@@ -799,7 +954,106 @@ elif st.session_state.stage == 'playing':
                         if 'draw_count' not in st.session_state:
                             st.session_state.draw_count = 0
 
-                        st.markdown("""
+                        back_uri = img_uri("images/homepage.png", 460)
+                        pending = st.session_state.get('flip_pending')
+
+                        # --------------------------------------------------
+                        # 🎬 已選牌 -> 播放「真・3D 翻牌」動畫 (純前端 CSS)
+                        # --------------------------------------------------
+                        if pending:
+                            autoplay_audio("sound_effect.aac")
+                            front_uri = img_uri(f"images/{pending['card']}.png", 800)
+                            flip_html = f"""
+                            <style>
+                              .flip-stage {{
+                                display:flex; flex-direction:column; align-items:center;
+                                justify-content:center; padding:10px 0;
+                                font-family:'Inter','Noto Sans TC',sans-serif;
+                              }}
+                              .flip-label {{
+                                color:#6B7280; font-size:15px; margin-bottom:14px; font-weight:600;
+                                animation: labelSwap 1.8s ease forwards;
+                              }}
+                              @keyframes labelSwap {{
+                                0%,60% {{ opacity:1; }} 75% {{ opacity:0; }} 100% {{ opacity:0; }}
+                              }}
+                              .flip-scene {{ width:min(440px,90vw); aspect-ratio:764/510; perspective:1400px; }}
+                              .flip-card {{
+                                position:relative; width:100%; height:100%;
+                                transform-style:preserve-3d;
+                                animation: spinFlip 1.6s cubic-bezier(.28,.72,.30,1) forwards;
+                              }}
+                              @keyframes spinFlip {{
+                                0%   {{ transform: rotateY(0deg)   scale(.94); }}
+                                55%  {{ transform: rotateY(520deg) scale(1.06); }}
+                                100% {{ transform: rotateY(900deg) scale(1); }}
+                              }}
+                              .flip-face {{
+                                position:absolute; inset:0; backface-visibility:hidden;
+                                border-radius:14px; overflow:hidden;
+                                box-shadow:0 14px 34px rgba(0,0,0,.28);
+                                background:#fff;
+                              }}
+                              .flip-face img {{ width:100%; height:100%; object-fit:cover; display:block; }}
+                              .flip-front {{ transform: rotateY(180deg); }}
+                              .flip-glow {{
+                                position:absolute; inset:-6px; border-radius:18px; pointer-events:none;
+                                box-shadow:0 0 0 0 rgba(37,99,235,0);
+                                animation: glowHit 0.7s ease-out 1.5s forwards;
+                              }}
+                              @keyframes glowHit {{
+                                0%   {{ box-shadow:0 0 0 0 rgba(37,99,235,.55); }}
+                                100% {{ box-shadow:0 0 34px 12px rgba(37,99,235,0); }}
+                              }}
+                            </style>
+                            <div class="flip-stage">
+                              <div class="flip-label">🎴 正在翻開命運卡 {pending['picked']}...</div>
+                              <div class="flip-scene">
+                                <div class="flip-card">
+                                  <div class="flip-face flip-back"><img src="{back_uri}"></div>
+                                  <div class="flip-face flip-front"><img src="{front_uri}"></div>
+                                  <div class="flip-glow"></div>
+                                </div>
+                              </div>
+                            </div>
+                            """
+                            components.html(hide_stale_js(2800) + flip_html, height=380)
+                            # 動畫在瀏覽器端播放，伺服器只等它跑完 (不再逐格推送畫面)
+                            time.sleep(2.3)
+                            st.session_state.event_card_input = pending['card']
+                            st.session_state.flip_pending = None
+                            st.rerun()
+
+                        # --------------------------------------------------
+                        # 🎴 尚未選牌 -> 顯示三張「整張可點」的卡片
+                        # --------------------------------------------------
+                        st.markdown(f"""
+                        <style>
+                          div[class*="st-key-cardslot_"] div.stButton > button {{
+                            height: 210px;
+                            border-radius: 14px;
+                            border: 2px solid #E5E7EB;
+                            background-image: url("{back_uri}");
+                            background-size: cover;
+                            background-position: center;
+                            box-shadow: 0 6px 16px rgba(0,0,0,.12);
+                            transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+                            font-size: 0 !important;
+                            padding: 0 !important;
+                          }}
+                          div[class*="st-key-cardslot_"] div.stButton > button:hover {{
+                            transform: translateY(-10px) scale(1.03);
+                            box-shadow: 0 16px 32px rgba(37,99,235,.32);
+                            border-color: #2563EB;
+                          }}
+                          div[class*="st-key-cardslot_"] div.stButton > button:active {{
+                            transform: translateY(-4px) scale(.99);
+                          }}
+                          .card-pos-label {{
+                            text-align:center; font-weight:700; color:#4B5563;
+                            margin-top:8px; font-size:15px; letter-spacing:1px;
+                          }}
+                        </style>
                         <div style='text-align: center; margin-bottom: 16px;'>
                             <div style='font-size: 1.15rem; font-weight: 700; color: #1E40AF;'>🔮 命運三選一</div>
                             <div style='color: #6B7280; font-size: 0.9rem; margin-top: 4px;'>憑直覺選一張吧！</div>
@@ -807,29 +1061,24 @@ elif st.session_state.stage == 'playing':
                         """, unsafe_allow_html=True)
 
                         picked_pos = None
-                        cover_img = "images/homepage.png"
                         card_cols = st.columns(3, gap="large")
                         for idx, pos in enumerate(['A', 'B', 'C']):
                             with card_cols[idx]:
-                                if os.path.exists(cover_img):
-                                    st.image(cover_img, use_container_width=True)
-                                else:
-                                    st.markdown("<div style='text-align: center; font-size: 60px;'>🎴</div>", unsafe_allow_html=True)
-                                if st.button(f"選擇 {pos}", type="primary", use_container_width=True, key=f"pick_{pos}_{current_year}"):
-                                    picked_pos = pos
+                                with st.container(key=f"cardslot_{pos}_{current_year}"):
+                                    if st.button(pos, use_container_width=True,
+                                                 key=f"pick_{pos}_{current_year}"):
+                                        picked_pos = pos
+                                st.markdown(f"<div class='card-pos-label'>{pos}</div>",
+                                            unsafe_allow_html=True)
 
                         if picked_pos:
-                            # --- 🔥 播放緊張音效 ---
-                            autoplay_audio("sound_effect.aac")
-
-                            # 🔥 保底機制：整局三次抽卡，恰好一次落在好牌池 (第幾次由 lucky_draw_round 決定)
+                            # 🔥 保底機制：整局三次抽卡，恰好一次落在好牌池
                             # 玩家選 A/B/C 只是儀式感，實際結果由後台機率決定
                             st.session_state.draw_count += 1
                             if st.session_state.draw_count == st.session_state.lucky_draw_round:
                                 final_card_id = random.choice(GOOD_CARDS)
                             else:
                                 final_card_id = random.choice(BAD_CARDS)
-                            final_card_name = EVENT_CARDS[final_card_id]['name']
 
                             # 另外兩張的翻牌結果：抽到壞牌時，未選的兩張必有一張好牌「擦肩而過」；
                             # 抽到好牌時，另外兩張都是壞牌，讓玩家覺得直覺神準
@@ -844,47 +1093,9 @@ elif st.session_state.stage == 'playing':
                                 'picked': picked_pos,
                                 'others': list(zip(other_pos, other_cards))
                             }
-
-                            # --- 🎬 緊張感特效：事件名稱跳動動畫 ---
-                            effect_placeholder = st.empty()
-                            progress_bar = st.progress(0)
-                            all_cards = list(EVENT_CARDS.keys())
-
-                            steps = 30
-                            for i in range(steps):
-                                temp_name = EVENT_CARDS[random.choice(all_cards)]['name']
-                                effect_placeholder.markdown(f"""
-                                <div style="text-align: center; padding: 20px;">
-                                    <div style="font-size: 1.2rem; color: #6B7280; margin-bottom: 10px;">⚡ 正在翻開命運卡 {picked_pos}...</div>
-                                    <div style="font-size: 2rem; font-weight: 800; color: #E5E7EB; margin-top: 10px; min-height: 60px;">
-                                        {temp_name}
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                progress_bar.progress(int((i / steps) * 80))
-                                time.sleep(0.05 + (i * 0.01)) # 越來越慢
-
-                            for _ in range(3):
-                                effect_placeholder.markdown(f"""
-                                <div style="text-align: center; padding: 20px;">
-                                    <div style="font-size: 1.2rem; color: #EF4444; margin-bottom: 10px; font-weight: bold;">⚠️ 命運已鎖定！</div>
-                                    <div style="font-size: 2.2rem; font-weight: 800; color: #EF4444; margin-top: 10px; text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); min-height: 60px;">
-                                        {final_card_name}
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                time.sleep(0.15)
-                                effect_placeholder.empty()
-                                time.sleep(0.1)
-
-                            progress_bar.progress(100)
-                            time.sleep(0.5)
-
-                            # --- 寫入結果 ID 並重整 ---
-                            st.session_state.event_card_input = final_card_id
+                            st.session_state.flip_pending = {'picked': picked_pos, 'card': final_card_id}
                             st.rerun()
 
-                # ----------------------------------------------------
                 # 情況 B: 已有卡片代碼 -> 顯示結果與結算
                 # ----------------------------------------------------
                 else:
@@ -999,6 +1210,25 @@ elif st.session_state.stage == 'playing':
                 else:
                     current_pcts[k] = 20.0
             
+            # 🔥 讓玩家在「做決定的當下」就看到各資產的十年複利威力
+            st.markdown("##### 📐 接下來十年，每 $1 會變成多少？")
+            rate_cols = st.columns(5)
+            for i, k in enumerate(ASSET_KEYS):
+                r = st.session_state.dynamic_rates[k]
+                mult = decade_multiplier(r)
+                color = FINANCE_COLORS[ASSET_NAMES[k]]
+                rate_cols[i].markdown(f"""
+                <div style="text-align:center; background:#fff; border:1px solid #E5E7EB;
+                            border-top:3px solid {color}; border-radius:8px; padding:8px 4px;">
+                  <div style="font-size:12px; color:#6B7280;">{ASSET_NAMES[k]}</div>
+                  <div style="font-size:13px; color:#374151; font-weight:600;">{r*100:.0f}% / 年</div>
+                  <div style="font-size:20px; font-weight:800; color:{color}; line-height:1.2;">×{mult:.2f}</div>
+                  <div style="font-size:11px; color:#9CA3AF;">複利 10 年</div>
+                </div>
+                """, unsafe_allow_html=True)
+            st.caption("⚠️ 這是「沒有事件衝擊」下的理論值；命運卡會大幅改寫結果。")
+            st.write("")
+
             st.write("請調整下方比例 (預設為當前資產比例)：")
             
             c1, c2, c3, c4, c5 = st.columns(5)
@@ -1046,52 +1276,42 @@ elif st.session_state.stage == 'playing':
 
 # --- 3. 推進時間軸 ---
     elif current_year < 30:
-        with st.container():
-            st.markdown(f"### ⏩ 推進時間軸: 第 {current_year+1} - {current_year+10} 年")
-            
-            # 🔥 修改處 1：建立一個專門放「資產快照」的佔位符
-            snapshot_placeholder = st.empty()
-            
-            # 將內容放進佔位符中
-            if current_year == 0:
-                with snapshot_placeholder.container():
-                    render_asset_snapshot(st.session_state.assets, title="📊 第 0 年初始配置確認")
-                    st.write("") 
+        run_simulation = st.session_state.get('jump_pending', False)
 
-            run_simulation = False
-            
-            # 建立一個 Placeholder 來包住按鈕
-            action_placeholder = st.empty()
-            
-            with action_placeholder.container():
-                # 按鈕區域佈局
+        # 尚未啟動時光機 -> 顯示快照與按鈕
+        if not run_simulation:
+            with st.container():
+                st.markdown(f"### ⏩ 推進時間軸: 第 {current_year+1} - {current_year+10} 年")
+
+                if current_year == 0:
+                    render_asset_snapshot(st.session_state.assets, title="📊 第 0 年初始配置確認")
+                    st.write("")
+
                 if current_year == 0:
                     c_back, c_run = st.columns([1, 4])
                     with c_back:
                         if st.button("⬅️ 返回重設"):
                             st.session_state.stage = 'setup'
-                            st.session_state.history = [] 
+                            st.session_state.history = []
                             st.rerun()
                     with c_run:
                         if st.button(f"🚀 啟動時光機 (前往第 {current_year+10} 年)", type="primary"):
-                            run_simulation = True
+                            st.session_state.jump_pending = True
+                            st.rerun()  # 先重整，讓轉場動畫在乾淨的畫面上播放
                 else:
                     if st.button(f"🚀 前往下一個十年 (Year {current_year+10})", type="primary"):
-                        run_simulation = True
-            
-            # --- ⏳ 轉場動畫與計算邏輯 ---
-            if run_simulation:
-                # 🔥 修改處 2：加入 metrics_placeholder.empty()
-                # 這樣動畫開始時，最上面的年份跟資產也會一起消失
-                metrics_placeholder.empty() 
-                action_placeholder.empty()
-                snapshot_placeholder.empty() 
+                        st.session_state.jump_pending = True
+                        st.rerun()
 
-                # 1. 建立一個佔位區塊，用來顯示全螢幕過場動畫
+        # --- ⏳ 轉場動畫與計算邏輯 (獨佔畫面) ---
+        else:
+            if True:
+                # 動畫開始時，把上方年份/資產儀表板一起清掉
+                metrics_placeholder.empty()
+
                 transition_placeholder = st.empty()
-                
-                
-                # 2. 決定過場圖片
+
+                # 1. 決定過場圖片與標語
                 if current_year == 0:
                     jump_img = "images/wait1.png"
                     jump_text = "🚀 3, 2, 1... 投資旅程正式展開！"
@@ -1101,53 +1321,147 @@ elif st.session_state.stage == 'playing':
                 else:
                     jump_img = "images/wait3.png"
                     jump_text = "🏁 最後衝刺！迎向財富自由的終點！"
-                
-                # 3. 顯示過場畫面
-                with transition_placeholder.container():
-                    st.markdown("---")
-                    t_c1, t_c2, t_c3 = st.columns([1, 0.5, 1])
-                    with t_c2:
-                        st.markdown(f"<h2 style='text-align: center; color: #2563EB;'>{jump_text}</h2>", unsafe_allow_html=True)
-                        
-                        # 進度條 (Progress Bar) 顯示在圖片上方
-                        progress_text = "正在計算複利效應..."
-                        my_bar = st.progress(0, text=progress_text)
-                        
-                        if os.path.exists(jump_img):
-                            st.image(jump_img, use_container_width=True)
-                        else:
-                            st.markdown("""<div style='text-align: center; font-size: 80px; margin: 40px 0; animation: bounce 1s infinite;'>⏳ ➡️ 💰</div>""", unsafe_allow_html=True)
-                        
-                        # 跑進度條動畫
-                        for percent_complete in range(100):
-                            time.sleep(0.015) 
-                            my_bar.progress(percent_complete + 1, text=progress_text)
-                    
-                    time.sleep(0.5) 
 
-                # 4. 執行數學計算 (後台)
+                # 2. 先算完十年複利 (才能把真實數字餵給前端動畫)
+                before_assets = dict(st.session_state.assets)
+                rates = st.session_state.dynamic_rates
+
                 for y in range(1, 11):
-                    st.session_state.assets['Dividend'] *= (1 + st.session_state.dynamic_rates['Dividend']) 
-                    st.session_state.assets['USBond']   *= (1 + st.session_state.dynamic_rates['USBond']) 
-                    st.session_state.assets['TWStock']  *= (1 + st.session_state.dynamic_rates['TWStock']) 
-                    st.session_state.assets['Cash']     *= (1 + st.session_state.dynamic_rates['Cash'])
-                    st.session_state.assets['Crypto']   *= (1 + st.session_state.dynamic_rates['Crypto']) 
-                    
+                    for k in ASSET_KEYS:
+                        st.session_state.assets[k] *= (1 + rates[k])
                     record = {'Year': current_year + y, 'Total': sum(st.session_state.assets.values())}
                     record.update(st.session_state.assets)
                     st.session_state.history.append(record)
-                
-                # ... (上面是 for 迴圈計算複利) ...
-                
-                st.session_state.year += 10 
-                
-                # 🔥 【加入這段】存下第 10 或 20 年狀態
-                last_config_year = f"Year {current_year}" # 抓取上一個十年的配置
+
+                after_assets = dict(st.session_state.assets)
+
+                # 3. 🔥 逐年資產跳動計數器 (純前端動畫，伺服器不再逐格推送畫面)
+                anim_assets = [{
+                    'name': ASSET_NAMES[k],
+                    'color': FINANCE_COLORS[ASSET_NAMES[k]],
+                    'rate': rates[k] * 100,
+                    'from': before_assets[k],
+                    'to': after_assets[k],
+                } for k in ASSET_KEYS]
+
+                anim_cfg = json.dumps({
+                    'y0': current_year + 1,
+                    'y1': current_year + 10,
+                    'fromTotal': sum(before_assets.values()),
+                    'toTotal': sum(after_assets.values()),
+                    'assets': anim_assets,
+                }, ensure_ascii=False)
+
+                jump_uri = img_uri(jump_img, 480)
+                img_tag = (f'<img class="jump-art" src="{jump_uri}">'
+                           if jump_uri else '<div style="font-size:64px;margin:16px 0;">⏳ ➡️ 💰</div>')
+
+                anim_html = f"""
+                <style>
+                  .tm-wrap {{
+                    font-family:'Inter','Noto Sans TC',sans-serif; text-align:center;
+                    padding:6px 0; color:#1F2937;
+                  }}
+                  .tm-title {{ font-size:1.35rem; font-weight:800; color:#2563EB; margin-bottom:10px; }}
+                  .tm-year {{
+                    display:inline-block; background:#EFF6FF; color:#1E40AF; border:1px solid #BFDBFE;
+                    border-radius:999px; padding:4px 18px; font-size:1.05rem; font-weight:700;
+                    letter-spacing:1px; margin-bottom:6px;
+                  }}
+                  .tm-total {{
+                    font-size:2.9rem; font-weight:800; color:#111827;
+                    font-variant-numeric:tabular-nums; line-height:1.15; margin:2px 0 2px 0;
+                  }}
+                  .tm-gain {{ font-size:1rem; font-weight:700; color:#10B981; margin-bottom:10px; }}
+                  .jump-art {{ max-height:190px; border-radius:12px; margin:4px 0 12px 0; }}
+                  .tm-bars {{
+                    display:flex; gap:8px; justify-content:center; flex-wrap:wrap;
+                    max-width:820px; margin:0 auto;
+                  }}
+                  .tm-chip {{
+                    flex:1 1 140px; background:#fff; border:1px solid #E5E7EB; border-radius:10px;
+                    padding:8px 6px; box-shadow:0 1px 3px rgba(0,0,0,.05);
+                  }}
+                  .tm-chip .nm {{ font-size:12px; color:#6B7280; }}
+                  .tm-chip .rt {{
+                    display:inline-block; font-size:11px; font-weight:700; color:#fff;
+                    border-radius:999px; padding:1px 8px; margin:3px 0;
+                  }}
+                  .tm-chip .vl {{
+                    font-size:15px; font-weight:700; color:#1F2937; font-variant-numeric:tabular-nums;
+                  }}
+                  .tm-track {{
+                    height:6px; background:#E5E7EB; border-radius:99px; overflow:hidden;
+                    max-width:520px; margin:12px auto 0 auto;
+                  }}
+                  .tm-fill {{ height:100%; width:0%; background:linear-gradient(90deg,#2563EB,#1E40AF); }}
+                </style>
+                <div class="tm-wrap">
+                  <div class="tm-title">{jump_text}</div>
+                  <div class="tm-year" id="tmYear">第 0 年</div>
+                  <div class="tm-total" id="tmTotal">$0</div>
+                  <div class="tm-gain" id="tmGain">&nbsp;</div>
+                  {img_tag}
+                  <div class="tm-bars" id="tmBars"></div>
+                  <div class="tm-track"><div class="tm-fill" id="tmFill"></div></div>
+                </div>
+                <script>
+                  const CFG = {anim_cfg};
+                  const fmt = n => '$' + Math.round(n).toLocaleString('en-US');
+                  const bars = document.getElementById('tmBars');
+                  CFG.assets.forEach((a, i) => {{
+                    const d = document.createElement('div');
+                    d.className = 'tm-chip';
+                    d.innerHTML = '<div class="nm">' + a.name + '</div>' +
+                      '<div class="rt" style="background:' + a.color + '">' +
+                      (a.rate >= 0 ? '+' : '') + a.rate.toFixed(0) + '% / 年</div>' +
+                      '<div class="vl" id="chip' + i + '">' + fmt(a.from) + '</div>';
+                    bars.appendChild(d);
+                  }});
+                  const DUR = 3000, t0 = performance.now();
+                  // 依「複利曲線」內插，數字增長會越跑越快 —— 這就是複利的感覺
+                  const geo = (a, b, p) => (a <= 0 ? b * p : a * Math.pow(b / a, p));
+                  function frame(now) {{
+                    const p = Math.min((now - t0) / DUR, 1);
+                    const yr = Math.min(CFG.y1, CFG.y0 + Math.floor(p * (CFG.y1 - CFG.y0 + 1)));
+                    document.getElementById('tmYear').textContent = '第 ' + yr + ' 年';
+                    const tot = geo(CFG.fromTotal, CFG.toTotal, p);
+                    document.getElementById('tmTotal').textContent = fmt(tot);
+                    const gain = tot - CFG.fromTotal;
+                    document.getElementById('tmGain').textContent =
+                      (gain >= 0 ? '▲ +' : '▼ ') + fmt(Math.abs(gain)).replace('$', '$') + ' (複利累積中)';
+                    CFG.assets.forEach((a, i) => {{
+                      document.getElementById('chip' + i).textContent = fmt(geo(a.from, a.to, p));
+                    }});
+                    document.getElementById('tmFill').style.width = (p * 100) + '%';
+                    if (p < 1) requestAnimationFrame(frame);
+                  }}
+                  requestAnimationFrame(frame);
+                </script>
+                """
+
+                with transition_placeholder.container():
+                    components.html(hide_stale_js(4000) + anim_html, height=560)
+                    time.sleep(3.4)  # 等前端動畫播完 (期間不佔用運算資源)
+
+                # 4. 收尾：推進年份、存快照、留下十年成長報告供下一頁顯示
+                st.session_state.year += 10
+
+                st.session_state.last_decade_report = {
+                    'from_year': current_year,
+                    'to_year': st.session_state.year,
+                    'before': before_assets,
+                    'after': after_assets,
+                    'rates': dict(rates),
+                }
+
+                last_config_year = f"Year {current_year}"
                 current_config = st.session_state.config_history.get(last_config_year, {})
                 save_snapshot(st.session_state.user_name, st.session_state.year, st.session_state.assets, current_config)
 
                 st.session_state.waiting_for_event = True
-                
+                st.session_state.jump_pending = False
+
                 transition_placeholder.empty()
                 st.rerun()
     # 🔥 記得移除原本放在最下面的 render_asset_snapshot 呼叫（因為已經搬到上面了）
